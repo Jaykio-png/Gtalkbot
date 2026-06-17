@@ -125,16 +125,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/api/status' && req.method === 'GET') {
       const cfg = (await store.getConfig()) || {};
-      const roster = (await store.getRoster()) || {};
+      let roster = {}, supaErr = null;
+      try { roster = (await store.getRoster()) || {}; } catch (e) { supaErr = e.message; }
       const emps = Object.values(roster.employees || {});
       return sendJSON(res, 200, {
+        build: 'diag1',
         env: cfg.env || 'prod',
         oaId: cfg.oaId || '',
+        hasOaToken: !!cfg.oaToken,
+        hasMcpKey: !!cfg.mcpApiKey,
+        mcpKeyLen: (cfg.mcpApiKey || '').length,
+        supabase: store.useSupabase ? (supaErr ? 'LỖI: ' + supaErr : 'OK') : 'file-mode',
         lastMaxId: roster.lastMaxId || null,
         rosterSize: emps.length,
         maxTenureDays: cfg.maxTenureDays || 60,
-        updatedAt: roster.updatedAt || null,
-        campaignCount: (await store.getCampaigns()).length,
       });
     }
 
