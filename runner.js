@@ -99,8 +99,8 @@ async function run({ dryRun = true, sync = null, log = () => {}, now = new Date(
  * @param {{ids:Array, text:string, dryRun:boolean, log?:function}}
  */
 async function quickSend({ ids = [], text = '', parseMode = 'PLAIN_TEXT', imageUrl = '', dryRun = true, log = () => {} } = {}) {
-  const config = store.getConfig();
-  if (!config) throw new Error('Chưa có data/config.json.');
+  const config = await store.getConfig();
+  if (!config) throw new Error('Chưa có cấu hình (env hoặc data/config.json).');
   imageUrl = (imageUrl || '').trim();
   if (!text.trim() && !imageUrl) throw new Error('Chưa có nội dung tin nhắn hoặc ảnh.');
 
