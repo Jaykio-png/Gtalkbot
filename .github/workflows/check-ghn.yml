@@ -1,0 +1,18 @@
+name: Kiểm tra kết nối GHN (Actions có gọi được không)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Ping GHN gateway
+        run: node check.js
+        env:
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
