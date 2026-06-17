@@ -1,0 +1,29 @@
+name: Gửi tin hằng ngày (GTalk Campaign)
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 01:00 UTC = 08:00 giờ VN
+  workflow_dispatch: {}     # cho phép bấm chạy tay trên tab Actions
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Gửi tin theo lộ trình
+        run: node runner.js --run
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_BUCKET: images
+          OA_ID: ${{ secrets.OA_ID }}
+          OA_TOKEN: ${{ secrets.OA_TOKEN }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          GTALK_ENV: prod
+          BACKFILL_ID_SPAN: '10000'
+          MAX_TENURE_DAYS: '60'
+          CONCURRENCY: '8'

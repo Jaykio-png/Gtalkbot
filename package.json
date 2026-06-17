@@ -1,0 +1,12 @@
+{
+  "name": "gtalk-campaign-studio",
+  "version": "1.0.0",
+  "description": "Bắn tin GTalk theo lộ trình + đối tượng (GHN). Không dependency ngoài.",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "send": "node runner.js --run",
+    "preview": "node runner.js"
+  }
+}

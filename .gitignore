@@ -1,0 +1,5 @@
+node_modules/
+# Toàn bộ data/ (token, roster, log, ảnh, lộ trình test) — KHÔNG đẩy lên
+/data/
+*.log
+.DS_Store

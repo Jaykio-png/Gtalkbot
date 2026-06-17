@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Công cụ tra cứu thông tin nhân viên GHN - Giao Hàng Nhanh">
+  <title>GTalk Campaign Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Animated background blobs -->
+    <div class="bg-blob blob-1" aria-hidden="true"></div>
+    <div class="bg-blob blob-2" aria-hidden="true"></div>
+    <div class="bg-blob blob-3" aria-hidden="true"></div>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="logo">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <rect width="36" height="36" rx="10" fill="url(#logo-grad)"/>
+            <path d="M10 18L16 12L22 18L16 24Z" fill="white" opacity="0.9"/>
+            <path d="M16 14L26 14L26 24L16 24Z" fill="white" opacity="0.6"/>
+            <defs>
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="36" y2="36">
+                <stop stop-color="#F97316"/>
+                <stop offset="1" stop-color="#EA580C"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div>
+          <h1>Campaign Studio</h1>
+          <p class="header-subtitle">Bắn tin GTalk theo lộ trình &amp; đối tượng</p>
+        </div>
+      </div>
+      <div class="header-status" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Đang kiểm tra...</span>
+      </div>
+    </header>
+
+    <!-- Tab Switcher -->
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="single" id="tabSingle">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10 10L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Tra cứu đơn
+      </button>
+      <button class="tab-btn" data-tab="batch" id="tabBatch">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4H14M2 8H14M2 12H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Quét hàng loạt
+      </button>
+      <button class="tab-btn" data-tab="campaigns" id="tabCampaigns">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 3H14V13H2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M2 6H14M5 9H11M5 11H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Lộ trình
+      </button>
+      <button class="tab-btn" data-tab="run" id="tabRun">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 2L14 8L4 14Z" fill="currentColor"/>
+        </svg>
+        Chạy &amp; Gửi
+      </button>
+      <button class="tab-btn" data-tab="quick" id="tabQuick">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M9 1L2 9H8L7 15L14 7H8L9 1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        Gửi ngay
+      </button>
+    </div>
+
+    <!-- ===== TAB 1: Single Lookup ===== -->
+    <div class="tab-content" id="panelSingle" data-tab="single">
+      <section class="search-section">
+        <div class="search-card">
+          <div class="search-input-group">
+            <div class="search-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <circle cx="8.5" cy="8.5" r="6" stroke="currentColor" stroke-width="2"/>
+                <path d="M13 13L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <input type="text" id="searchInput" class="search-input" placeholder="Nhập Employee ID (VD: 3099224)" autocomplete="off" inputmode="numeric">
+            <button id="searchBtn" class="search-btn" type="button">
+              <span class="btn-text">Tra cứu</span>
+              <span class="btn-loader" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg>
+              </span>
+            </button>
+          </div>
+          <div class="search-options">
+            <label class="toggle-label" for="includeOffToggle">
+              <span class="toggle-switch">
+                <input type="checkbox" id="includeOffToggle" role="switch">
+                <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+              </span>
+              <span>Bao gồm nhân viên đã nghỉ việc</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error -->
+      <div id="errorMessage" class="message-card message-error" hidden>
+        <div class="message-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg>
+        </div>
+        <p id="errorText"></p>
+      </div>
+
+      <!-- Result Card -->
+      <section id="resultSection" class="result-section" hidden>
+        <div class="result-card">
+          <div class="result-header">
+            <div class="result-avatar" id="resultAvatar"></div>
+            <div class="result-name-block">
+              <h2 id="resultName" class="result-name"></h2>
+              <p id="resultTitle" class="result-title"></p>
+              <span id="resultStatus" class="status-badge"></span>
+            </div>
+          </div>
+          <div class="result-grid">
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 8H12M6 11H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <div class="info-content"><span class="info-label">Employee ID</span><span class="info-value" id="infoEmployeeId"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 6L9 2L15 6V12L9 16L3 12Z" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="9" r="2" stroke="currentColor" stroke-width="1.5"/></svg></div>
+              <div class="info-content"><span class="info-label">MSNV (Candidate Code)</span><span class="info-value" id="infoCandidateCode"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="7" width="6" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="3" width="6" height="13" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M4 10H6M4 13H6M12 6H14M12 9H14M12 12H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <div class="info-content"><span class="info-label">Phòng ban / Tổ chức</span><span class="info-value" id="infoOrg"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="4" y="1" width="10" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="14" r="1" fill="currentColor"/></svg></div>
+              <div class="info-content"><span class="info-label">Số điện thoại</span><span class="info-value" id="infoPhone"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6L9 11L16 6" stroke="currentColor" stroke-width="1.5"/></svg></div>
+              <div class="info-content"><span class="info-label">Email công việc</span><span class="info-value" id="infoWorkEmail"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6L9 11L16 6" stroke="currentColor" stroke-width="1.5"/><circle cx="14" cy="5" r="3" fill="currentColor" opacity="0.4"/></svg></div>
+              <div class="info-content"><span class="info-label">Email nội bộ</span><span class="info-value" id="infoInternalEmail"></span></div>
+            </div>
+            <div class="info-item">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 7H16" stroke="currentColor" stroke-width="1.5"/><path d="M6 1V4M12 1V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <div class="info-content"><span class="info-label">Ngày vào làm</span><span class="info-value" id="infoStartDate"></span></div>
+            </div>
+            <div class="info-item" id="leaveDateItem">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 7H16" stroke="currentColor" stroke-width="1.5"/><path d="M7 11L11 15M11 11L7 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <div class="info-content"><span class="info-label">Ngày nghỉ việc</span><span class="info-value" id="infoLeaveDate"></span></div>
+            </div>
+            <div class="info-item info-item-highlight">
+              <div class="info-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M9 5V9L12 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <div class="info-content"><span class="info-label">Số ngày làm việc</span><span class="info-value info-value-accent" id="infoWorkingDays"></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== TAB 2: Batch Scan ===== -->
+    <div class="tab-content" id="panelBatch" data-tab="batch" hidden>
+      <section class="search-section">
+        <div class="search-card">
+          <p class="search-card-desc">Quét một dải Employee ID liên tục để tìm nhân viên. Tool sẽ tự động gọi API từng ID và hiển thị kết quả.</p>
+          <div class="batch-inputs">
+            <div class="batch-field">
+              <label for="batchFrom" class="batch-label">Từ ID</label>
+              <input type="number" id="batchFrom" class="batch-input" value="3150000" min="1">
+            </div>
+            <div class="batch-field">
+              <label for="batchTo" class="batch-label">Đến ID</label>
+              <input type="number" id="batchTo" class="batch-input" value="3150100" min="1">
+            </div>
+          </div>
+          <div class="search-options">
+            <label class="toggle-label" for="batchIncludeOff">
+              <span class="toggle-switch">
+                <input type="checkbox" id="batchIncludeOff" role="switch" checked>
+                <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+              </span>
+              <span>Bao gồm nhân viên đã nghỉ việc</span>
+            </label>
+          </div>
+          <div class="batch-actions">
+            <button id="batchStartBtn" class="search-btn" type="button">
+              <span class="btn-text">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2L14 8L4 14Z" fill="currentColor"/></svg>
+                Bắt đầu quét
+              </span>
+              <span class="btn-loader" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg>
+              </span>
+            </button>
+            <button id="batchStopBtn" class="search-btn search-btn-outline" type="button" hidden>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+              Dừng
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Batch Progress -->
+      <div id="batchProgress" class="batch-progress" hidden>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="progressText">0 / 0</span>
+          <span id="progressFound" class="progress-found">Tìm thấy: 0</span>
+        </div>
+      </div>
+
+      <!-- Batch Error -->
+      <div id="batchError" class="message-card message-error" hidden>
+        <div class="message-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg>
+        </div>
+        <p id="batchErrorText"></p>
+      </div>
+
+      <!-- Batch Results Table -->
+      <section id="batchResultSection" class="history-section" hidden>
+        <div class="history-card">
+          <div class="history-header">
+            <h2 class="history-title">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 3V17H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M7 13L10 9L13 11L17 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Kết quả quét
+            </h2>
+            <div class="history-actions">
+              <button id="batchSortBtn" class="icon-btn" title="Sắp xếp theo số ngày làm việc">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 5H15M5 9H13M7 13H11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span>Sắp xếp</span>
+              </button>
+              <button id="batchExportBtn" class="icon-btn" title="Xuất CSV">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 12V15H15V12M9 2V11M9 11L6 8M9 11L12 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Xuất CSV</span>
+              </button>
+              <button id="batchClearBtn" class="icon-btn icon-btn-danger" title="Xóa kết quả">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 5H15M6 5V3H12V5M7 8V14M11 8V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span>Xóa</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Filter Bar -->
+          <div class="filter-bar">
+            <div class="filter-group">
+              <label class="filter-label" for="filterTitle">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1 2H13M3 5H11M5 8H9M6 11H8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                Chức danh
+              </label>
+              <select id="filterTitle" class="filter-select">
+                <option value="">Tất cả</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M7 4V7L9 8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                Ngày LV
+              </label>
+              <div class="filter-range">
+                <input type="number" id="filterDaysMin" class="filter-input" placeholder="Từ" min="0">
+                <span class="filter-range-sep">—</span>
+                <input type="number" id="filterDaysMax" class="filter-input" placeholder="Đến" min="0">
+              </div>
+            </div>
+            <div class="filter-group filter-group-end">
+              <button id="clearFiltersBtn" class="filter-clear-btn" type="button">Xóa lọc</button>
+              <span id="filterCount" class="filter-count"></span>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th class="col-sortable" id="thWorkingDays">
+                    Ngày LV
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="sort-icon" aria-hidden="true">
+                      <path d="M6 2V10M6 2L3 5M6 2L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </th>
+                  <th>Họ tên</th>
+                  <th>Employee ID</th>
+                  <th>MSNV</th>
+                  <th>Chức danh</th>
+                  <th>Phòng ban</th>
+                  <th>Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody id="batchBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== TAB 3: Lộ trình (composer) ===== -->
+    <div class="tab-content" id="panelCampaigns" data-tab="campaigns" hidden>
+      <section class="cmp-layout">
+        <!-- Danh sách lộ trình -->
+        <aside class="cmp-list-card">
+          <div class="cmp-list-head">
+            <h2 class="history-title">Lộ trình</h2>
+            <button id="cmpNewBtn" class="search-btn search-btn-sm" type="button">+ Tạo mới</button>
+          </div>
+          <ul id="cmpList" class="cmp-list"></ul>
+        </aside>
+
+        <!-- Trình soạn 1 lộ trình -->
+        <div class="cmp-editor-card" id="cmpEditor" hidden>
+          <div class="cmp-editor-head">
+            <input type="text" id="cmpName" class="cmp-name-input" placeholder="Tên lộ trình (VD: Onboarding Nhân viên Phân hàng)">
+            <label class="toggle-label" for="cmpEnabled">
+              <span class="toggle-switch"><input type="checkbox" id="cmpEnabled" role="switch" checked><span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span></span>
+              <span>Bật</span>
+            </label>
+          </div>
+
+          <h3 class="cmp-section-title">📅 Cách tính mốc ngày</h3>
+          <div class="cmp-anchor-row">
+            <select id="cmpAnchor" class="cmp-anchor-select">
+              <option value="tenure">Theo số ngày làm việc (thâm niên) — cho nhân viên mới</option>
+              <option value="campaign">Theo ngày kể từ khi bắt đầu lộ trình — để test / chiến dịch</option>
+            </select>
+            <div class="cmp-startdate" id="cmpStartDateWrap" hidden>
+              <label class="filter-label">Ngày bắt đầu</label>
+              <input type="date" id="cmpStartDate" class="cmp-date-input">
+            </div>
+          </div>
+
+          <h3 class="cmp-section-title">👥 Danh sách ID cố định <span class="cmp-count">(tùy chọn)</span></h3>
+          <p class="cmp-hint">Dán employee_id (kể cả người cũ) → chỉ gửi cho đúng những người này. <b>Để trống</b> = dùng bộ lọc đối tượng bên dưới.</p>
+          <textarea id="cmpTargetIds" class="qs-ids" rows="3" placeholder="VD: 3099224, 3174877 ... (để trống nếu lọc theo đối tượng)"></textarea>
+
+          <h3 class="cmp-section-title">🎯 Đối tượng (để trống = tất cả)</h3>
+          <div class="cmp-audience">
+            <div class="cmp-field">
+              <label class="filter-label">Chức danh <span class="cmp-count" id="cntTitles"></span></label>
+              <input type="text" class="cmp-search" data-target="cmpTitles" placeholder="🔎 Tìm chức danh...">
+              <select id="cmpTitles" class="cmp-multi" multiple size="6"></select>
+            </div>
+            <div class="cmp-field">
+              <label class="filter-label">Khối <span class="cmp-count" id="cntDivisions"></span></label>
+              <input type="text" class="cmp-search" data-target="cmpDivisions" placeholder="🔎 Tìm khối...">
+              <select id="cmpDivisions" class="cmp-multi" multiple size="6"></select>
+            </div>
+            <div class="cmp-field">
+              <label class="filter-label">Phòng ban <span class="cmp-count" id="cntDepartments"></span></label>
+              <input type="text" class="cmp-search" data-target="cmpDepartments" placeholder="🔎 Tìm phòng ban...">
+              <select id="cmpDepartments" class="cmp-multi" multiple size="6"></select>
+            </div>
+          </div>
+          <p class="cmp-hint">Giữ Ctrl/Cmd để chọn nhiều. Chỉ gửi cho nhân viên <b>đang làm việc</b>.</p>
+
+          <h3 class="cmp-section-title">✉️ Nội dung theo mốc ngày làm việc</h3>
+          <div class="cmp-anchor-row">
+            <div class="cmp-startdate">
+              <label class="filter-label">Định dạng chữ</label>
+              <select id="cmpParseMode" class="cmp-anchor-select" style="min-width:200px">
+                <option value="PLAIN_TEXT">Chữ thường (Plain)</option>
+                <option value="MARKDOWN">Markdown (**đậm**, [link](url))</option>
+                <option value="HTML">HTML (&lt;b&gt;, &lt;a&gt;, &lt;br/&gt;)</option>
+              </select>
+            </div>
+          </div>
+          <p class="cmp-hint">Dùng <code>[Tên]</code>, <code>{title}</code>, <code>{division}</code>, <code>{department}</code> để chèn dữ liệu. Mỗi mốc có thể đính 1 ảnh qua <b>URL</b> (khi đó nội dung chữ thành caption).</p>
+          <div id="cmpMessages" class="cmp-messages"></div>
+          <button id="cmpAddMsg" class="search-btn search-btn-outline search-btn-sm" type="button">+ Thêm mốc</button>
+
+          <div class="cmp-editor-actions">
+            <button id="cmpDeleteBtn" class="icon-btn icon-btn-danger" type="button">Xóa lộ trình</button>
+            <button id="cmpSaveBtn" class="search-btn" type="button">💾 Lưu</button>
+          </div>
+          <p id="cmpSavedMsg" class="cmp-saved" hidden>Đã lưu ✓</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== TAB 4: Chạy & Gửi ===== -->
+    <div class="tab-content" id="panelRun" data-tab="run" hidden>
+      <section class="search-section">
+        <div class="search-card">
+          <div id="runStatus" class="run-status">Đang tải trạng thái...</div>
+          <p class="search-card-desc">“Xem trước” chỉ tính & hiển thị ai sẽ nhận tin gì hôm nay — <b>không gửi</b>. “Gửi thật” mới bắn tin qua GTalk.</p>
+          <div class="batch-actions">
+            <button id="runPreviewBtn" class="search-btn search-btn-outline" type="button"><span class="btn-text">👀 Xem trước hôm nay</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+            <button id="runSendBtn" class="search-btn" type="button" disabled><span class="btn-text">📤 Gửi thật</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+          </div>
+        </div>
+      </section>
+
+      <div id="runError" class="message-card message-error" hidden><div class="message-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg></div><p id="runErrorText"></p></div>
+
+      <section id="runResultSection" class="history-section" hidden>
+        <div class="history-card">
+          <div class="history-header">
+            <h2 class="history-title" id="runResultTitle">Kết quả</h2>
+            <span id="runCount" class="filter-count"></span>
+          </div>
+          <div class="table-wrapper">
+            <table class="history-table">
+              <thead><tr><th>#</th><th>Lộ trình</th><th>Mốc</th><th>Họ tên</th><th>Employee ID</th><th>Chức danh</th><th>Nội dung sẽ gửi</th></tr></thead>
+              <tbody id="runBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== TAB 5: Gửi ngay ===== -->
+    <div class="tab-content" id="panelQuick" data-tab="quick" hidden>
+      <section class="search-section">
+        <div class="search-card">
+          <p class="search-card-desc">Dán danh sách <b>employee_id</b> và soạn tin để <b>gửi ngay</b> — không cần mốc ngày, không phụ thuộc roster. Dùng cho thông báo cụ thể / nhân viên cũ.</p>
+          <div class="qs-grid">
+            <div class="qs-field">
+              <label class="filter-label">Danh sách Employee ID</label>
+              <textarea id="qsIds" class="qs-ids" rows="6" placeholder="VD:&#10;3099224&#10;3174877, 3174878&#10;3173802"></textarea>
+              <span id="qsIdCount" class="cmp-hint"></span>
+            </div>
+            <div class="qs-field">
+              <label class="filter-label">Nội dung tin nhắn</label>
+              <textarea id="qsText" class="qs-text" rows="6" placeholder="Chào [Tên], ..."></textarea>
+              <span class="cmp-hint">Có thể dùng <code>[Tên]</code>, <code>{title}</code>, <code>{division}</code>, <code>{department}</code>.</span>
+            </div>
+          </div>
+          <div class="cmp-anchor-row" style="margin-bottom:1rem">
+            <div class="cmp-startdate">
+              <label class="filter-label">Định dạng chữ</label>
+              <select id="qsParseMode" class="cmp-anchor-select" style="min-width:180px">
+                <option value="PLAIN_TEXT">Chữ thường</option>
+                <option value="MARKDOWN">Markdown</option>
+                <option value="HTML">HTML</option>
+              </select>
+            </div>
+            <div class="qs-field" style="flex:1">
+              <label class="filter-label">Ảnh (tùy chọn)</label>
+              <div class="cmp-img-row">
+                <input type="text" id="qsImg" class="cmp-msg-img" placeholder="🖼️ URL ảnh, hoặc bấm Tải ảnh →">
+                <label class="cmp-upload-btn">📎 Tải ảnh<input type="file" id="qsFile" accept="image/png,image/jpeg,image/gif" hidden></label>
+                <span id="qsImgStatus" class="cmp-img-status"></span>
+              </div>
+            </div>
+          </div>
+          <div class="batch-actions">
+            <button id="qsPreviewBtn" class="search-btn search-btn-outline" type="button"><span class="btn-text">👀 Xem trước</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+            <button id="qsSendBtn" class="search-btn" type="button" disabled><span class="btn-text">⚡ Gửi ngay</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+          </div>
+        </div>
+      </section>
+
+      <div id="qsError" class="message-card message-error" hidden><div class="message-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 8V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/></svg></div><p id="qsErrorText"></p></div>
+
+      <section id="qsResultSection" class="history-section" hidden>
+        <div class="history-card">
+          <div class="history-header">
+            <h2 class="history-title" id="qsResultTitle">Kết quả</h2>
+            <span id="qsCount" class="filter-count"></span>
+          </div>
+          <div class="table-wrapper">
+            <table class="history-table">
+              <thead><tr><th>#</th><th>Employee ID</th><th>Họ tên</th><th>Chức danh</th><th>Trạng thái</th><th>Nội dung</th></tr></thead>
+              <tbody id="qsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+  <script src="campaigns.js"></script>
+</body>
+</html>

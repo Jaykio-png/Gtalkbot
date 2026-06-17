@@ -1,0 +1,30 @@
+# Render Blueprint — web service cho giao diện + API (free).
+# Dữ liệu nằm ở Supabase nên không cần ổ đĩa.
+services:
+  - type: web
+    name: gtalk-campaign-studio
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server.js
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: images
+      - key: OA_ID
+        sync: false
+      - key: OA_TOKEN
+        sync: false
+      - key: MCP_API_KEY
+        sync: false
+      - key: GTALK_ENV
+        value: prod
+      - key: AUTH_USER
+        sync: false
+      - key: AUTH_PASS
+        sync: false
+      - key: PORT
+        value: "8090"
