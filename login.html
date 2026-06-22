@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Đăng nhập · GTalk Campaign Studio</title>
+  <style>
+    :root {
+      --accent: #FF5200; --accent-2: #ff7a3c;
+      --ink: #1a1d26; --muted: #6b7080; --danger: #e5484d;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background: #14161c;
+      position: relative; overflow: hidden;
+    }
+    /* nền gradient + 2 vầng sáng cam */
+    body::before, body::after {
+      content: ""; position: absolute; border-radius: 50%; filter: blur(80px); opacity: .55; z-index: 0;
+    }
+    body::before { width: 520px; height: 520px; background: var(--accent); top: -160px; right: -120px; }
+    body::after  { width: 460px; height: 460px; background: #ff9a52; bottom: -180px; left: -140px; opacity: .35; }
+
+    .card {
+      position: relative; z-index: 1; width: 100%; max-width: 380px;
+      background: rgba(255,255,255,.96); backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,.6); border-radius: 22px;
+      padding: 40px 34px 34px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.2);
+      text-align: center; animation: rise .5s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
+
+    .logo {
+      width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff; font-size: 30px; font-weight: 800;
+      box-shadow: 0 10px 24px rgba(255,82,0,.45);
+    }
+    h1 { font-size: 20px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.2px; }
+    p.sub { margin: 0 0 26px; color: var(--muted); font-size: 13.5px; }
+
+    /* ô mật khẩu + nút hiện/ẩn */
+    .field { position: relative; }
+    .field input {
+      width: 100%; height: 52px; padding: 0 46px 0 16px; font-size: 16px;
+      color: var(--ink); background: #f6f7fb; border: 2px solid #e6e8ef; border-radius: 12px;
+      outline: none; transition: border-color .15s, background .15s;
+    }
+    .field input:focus { border-color: var(--accent); background: #fff; }
+    .toggle {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+      border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 0; box-shadow: none;
+    }
+    .toggle:hover { color: var(--ink); transform: translateY(-50%); }
+
+    .err { color: var(--danger); font-size: 13px; min-height: 18px; margin: 14px 0 4px; font-weight: 500; }
+
+    button.submit {
+      width: 100%; padding: 14px; font-size: 15px; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border: none; border-radius: 12px; cursor: pointer;
+      box-shadow: 0 8px 20px rgba(255,82,0,.35); transition: transform .12s, box-shadow .12s, opacity .15s;
+    }
+    button.submit:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(255,82,0,.45); }
+    button.submit:active { transform: translateY(0); }
+    button.submit:disabled { opacity: .6; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .shake { animation: shake .4s; }
+    @keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }
+  </style>
+</head>
+<body>
+  <form class="card" id="form" autocomplete="off">
+    <div class="logo">G</div>
+    <h1>GTalk Campaign Studio</h1>
+    <p class="sub">Nhập mật khẩu để vào hệ thống</p>
+
+    <div class="field">
+      <input id="pw" type="password" placeholder="Mật khẩu" autocomplete="current-password" autofocus aria-label="Mật khẩu" />
+      <button type="button" class="toggle" id="toggle" aria-label="Hiện/ẩn mật khẩu">
+        <svg id="eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="err" id="err"></div>
+    <button type="submit" class="submit" id="btn">Đăng nhập</button>
+  </form>
+
+  <script>
+    const form = document.getElementById('form');
+    const pw = document.getElementById('pw');
+    const btn = document.getElementById('btn');
+    const err = document.getElementById('err');
+    const toggle = document.getElementById('toggle');
+    const eye = document.getElementById('eye');
+
+    pw.focus();
+    pw.addEventListener('input', () => { err.textContent = ''; });
+
+    toggle.addEventListener('click', () => {
+      const show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      eye.innerHTML = show
+        ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+        : '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>';
+      pw.focus();
+    });
+
+    let sending = false;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (sending) return;
+      if (!pw.value) { err.textContent = 'Nhập mật khẩu.'; return; }
+      sending = true; btn.disabled = true; err.textContent = '';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw.value }),
+        });
+        if (r.ok) { window.location.href = '/'; return; }
+        const j = await r.json().catch(() => ({}));
+        err.textContent = j.error || 'Sai mật khẩu';
+        form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
+        pw.value = ''; pw.focus();
+      } catch {
+        err.textContent = 'Lỗi kết nối, thử lại.';
+      } finally {
+        sending = false; btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

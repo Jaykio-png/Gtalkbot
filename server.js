@@ -2,6 +2,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const store = require('./lib/store');
 const { parseOrg } = require('./lib/match');
 const { saveUpload } = require('./lib/image');
@@ -47,26 +48,36 @@ const slimSend = (s) => {
   };
 };
 
-// ---- Đăng nhập (Basic Auth) — bật khi đặt AUTH_USER + AUTH_PASS ----
-const AUTH_USER = process.env.AUTH_USER;
-const AUTH_PASS = process.env.AUTH_PASS;
-function authOK(req) {
-  if (!AUTH_USER || !AUTH_PASS) return true; // không bật auth nếu chưa cấu hình
-  const h = req.headers['authorization'] || '';
-  if (!h.startsWith('Basic ')) return false;
-  const [u, p] = Buffer.from(h.slice(6), 'base64').toString().split(':');
-  return u === AUTH_USER && p === AUTH_PASS;
+// ---- Đăng nhập bằng mật khẩu + cookie phiên ----
+const APP_PASSWORD = String(process.env.APP_PASSWORD || '').trim() || 'Lodoteam@2024'; // đặt APP_PASSWORD trong env để đổi
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // phiên sống 7 ngày
+const COOKIE = 'gt_sid';
+const SESSIONS = new Map(); // sid -> thời điểm hết hạn (ms)
+
+function newSession() {
+  const sid = crypto.randomBytes(24).toString('hex');
+  SESSIONS.set(sid, Date.now() + SESSION_TTL);
+  return sid;
+}
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return null;
+}
+function isLoggedIn(req) {
+  const sid = readCookie(req, COOKIE);
+  const exp = sid && SESSIONS.get(sid);
+  if (!exp) return false;
+  if (Date.now() > exp) { SESSIONS.delete(sid); return false; }
+  return true;
 }
 
 const server = http.createServer(async (req, res) => {
   const url = req.url.split('?')[0];
 
-  if (!authOK(req)) {
-    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Campaign Studio"' });
-    return res.end('Cần đăng nhập');
-  }
-
-  // ---- CORS preflight ----
+  // ---- CORS preflight (không cần đăng nhập) ----
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
@@ -74,6 +85,45 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type, X-Mcp-Auth, X-Mcp-Session-Id',
     });
     return res.end();
+  }
+
+  // ================= Đăng nhập (công khai) =================
+  if (url === '/login' && req.method === 'GET') {
+    return fs.readFile(path.join(__dirname, 'login.html'), (err, data) => {
+      if (err) { res.writeHead(404); return res.end('login.html not found'); }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    });
+  }
+  if (url === '/api/login' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (String(body.password || '') === APP_PASSWORD) {
+      const sid = newSession();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `${COOKIE}=${sid}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL / 1000}`,
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+    return sendJSON(res, 401, { ok: false, error: 'Sai mật khẩu' });
+  }
+  if (url === '/api/logout' && req.method === 'POST') {
+    const sid = readCookie(req, COOKIE);
+    if (sid) SESSIONS.delete(sid);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `${COOKIE}=; HttpOnly; Path=/; Max-Age=0` });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
+  // ---- Mọi thứ còn lại đều cần đăng nhập ----
+  if (!isLoggedIn(req)) {
+    // Chỉ redirect khi là điều hướng trang (trình duyệt mở URL). API + tài nguyên (CSS/JS/ảnh)
+    // trả 401 sạch — tránh nhét HTML login vào file .css/.js làm vỡ giao diện.
+    const wantsHtml = (req.headers.accept || '').includes('text/html');
+    if (wantsHtml && req.method === 'GET') {
+      res.writeHead(302, { Location: '/login' });
+      return res.end();
+    }
+    return sendJSON(res, 401, { error: 'Chưa đăng nhập' });
   }
 
   // ---- MCP proxy (server TỰ gắn key từ config -> trình duyệt khỏi giữ key cũ) ----

@@ -92,7 +92,13 @@
         <h2 class="header-page-title" id="pageTitle">Tra cứu đơn</h2>
       </div>
       <div class="header-actions">
-        <!-- extra header actions can go here -->
+        <button id="logoutBtn" type="button" title="Đăng xuất"
+          style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--clr-border,#e2e4ea);background:var(--clr-surface,#fff);color:var(--clr-text-secondary,#5c6070);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Đăng xuất
+        </button>
       </div>
     </header>
 
@@ -642,6 +648,12 @@
         observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
       });
     })();
+
+    // ----- Đăng xuất -----
+    document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      window.location.href = '/login';
+    });
   </script>
 
   <script src="app.js"></script>
