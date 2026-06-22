@@ -33,6 +33,17 @@
     if (e.detail === 'run') loadRunStatus();
   });
 
+  /* ---------- Sub-tab wiring ---------- */
+  document.querySelectorAll('.cmp-subtab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.subtab;
+      // Toggle active on buttons
+      document.querySelectorAll('.cmp-subtab').forEach((b) => b.classList.toggle('active', b.dataset.subtab === target));
+      // Toggle panels
+      document.querySelectorAll('.cmp-subpanel').forEach((p) => { p.hidden = p.dataset.subtab !== target; });
+    });
+  });
+
   /* ================= COMPOSER ================= */
   async function loadComposer() {
     try {
@@ -109,6 +120,10 @@
     updateCounts();
     renderMessages(c.messages || []);
     $('cmpSavedMsg').hidden = true;
+
+    // Reset sub-tab to "Đối tượng"
+    document.querySelectorAll('.cmp-subtab').forEach((b) => b.classList.toggle('active', b.dataset.subtab === 'audience'));
+    document.querySelectorAll('.cmp-subpanel').forEach((p) => { p.hidden = p.dataset.subtab !== 'audience'; });
   }
 
   function renderMessages(messages) {
@@ -191,6 +206,8 @@
   }
 
   /* ================= RUN & SEND ================= */
+  let lastPreviewSends = []; // store for filtering
+
   async function loadRunStatus() {
     try {
       const s = await api('/api/status');
@@ -228,6 +245,7 @@
 
   function renderRunResult(r, isSend) {
     const sends = r.sends || [];
+    lastPreviewSends = sends;
     lastPreviewCount = sends.length;
     $('runSendBtn').disabled = sends.length === 0;
 
@@ -240,22 +258,78 @@
       $('runCount').innerHTML = `<span class="count-num">${sends.length}</span> tin sẽ gửi`;
     }
 
-    const tbody = $('runBody');
+    // Build campaign filter dropdown
+    const filter = $('runCampaignFilter');
+    const campaignNames = [...new Set(sends.map((s) => s.campaignName))].sort();
+    filter.innerHTML = '<option value="">Tất cả lộ trình</option>' +
+      campaignNames.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+
+    // Render grouped
+    renderGroupedResults(sends, isSend);
+  }
+
+  function renderGroupedResults(sends, isSend) {
+    const container = $('runGroupedBody');
+
     if (sends.length === 0) {
-      tbody.innerHTML = '<tr class="no-results-row"><td colspan="7">Hôm nay không có nhân viên nào trúng mốc trong các lộ trình đang bật.</td></tr>';
+      container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--clr-text-muted);font-style:italic;">Hôm nay không có nhân viên nào trúng mốc trong các lộ trình đang bật.</div>';
       return;
     }
-    tbody.innerHTML = sends.map((s, i) => `
-      <tr>
-        <td>${i + 1}</td>
-        <td>${esc(s.campaignName)}</td>
-        <td><span class="table-status active">ngày ${s.day}</span></td>
-        <td class="td-name">${esc(s.full_name)}</td>
-        <td>${s.employee_id}</td>
-        <td>${esc(s.title_name || '—')}</td>
-        <td class="td-msg">${esc(s.text)}</td>
-      </tr>`).join('');
+
+    // Group by campaignName
+    const groups = {};
+    sends.forEach((s) => {
+      const key = s.campaignName || '(Không rõ)';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
+
+    let html = '';
+    let idx = 0;
+    for (const [name, items] of Object.entries(groups)) {
+      html += `
+        <div class="run-campaign-group" data-campaign="${esc(name)}">
+          <div class="run-campaign-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="run-campaign-chevron"><path d="M5 3L9 7L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="run-campaign-name">${esc(name)}</span>
+            <span class="run-campaign-count">${items.length} tin</span>
+          </div>
+          <div class="run-campaign-body">
+            <table class="history-table">
+              <thead><tr><th>#</th><th>Mốc</th><th>Họ tên</th><th>Employee ID</th><th>Chức danh</th><th>Nội dung</th></tr></thead>
+              <tbody>`;
+      items.forEach((s) => {
+        idx++;
+        html += `
+                <tr>
+                  <td>${idx}</td>
+                  <td><span class="table-status active">ngày ${s.day}</span></td>
+                  <td class="td-name">${esc(s.full_name)}</td>
+                  <td>${s.employee_id}</td>
+                  <td>${esc(s.title_name || '—')}</td>
+                  <td class="td-msg">${esc(s.text)}</td>
+                </tr>`;
+      });
+      html += `
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+    container.innerHTML = html;
   }
+
+  // Campaign filter in Run tab
+  $('runCampaignFilter').addEventListener('change', () => {
+    const val = $('runCampaignFilter').value;
+    const groups = document.querySelectorAll('.run-campaign-group');
+    groups.forEach((g) => {
+      g.style.display = (!val || g.dataset.campaign === val) ? '' : 'none';
+    });
+    // Update count
+    const visible = val ? lastPreviewSends.filter((s) => s.campaignName === val).length : lastPreviewSends.length;
+    $('runCount').innerHTML = `<span class="count-num">${visible}</span> tin sẽ gửi`;
+  });
 
   /* ================= GỬI NGAY ================= */
   const parseIds = (raw) => [...new Set((raw.match(/\d+/g) || []).map(Number))];
@@ -281,20 +355,66 @@
     if (!ids.length) return alert('Chưa có employee_id.');
     if (!text.trim() && !imageUrl) return alert('Chưa có nội dung hoặc URL ảnh.');
     const btn = isSend ? $('qsSendBtn') : $('qsPreviewBtn');
+    const directFire = $('qsDirectFire').checked;
+    const resume = $('qsResume') ? $('qsResume').checked : false;
     setLoading(btn, true);
     $('qsError').hidden = true;
     try {
-      const r = await api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, text, parseMode, imageUrl }) });
-      renderQuick(r, isSend);
+      if (!isSend) {
+        const r = await api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, text, parseMode, imageUrl, directFire }) });
+        renderQuick(r, false);
+      } else {
+        // Gửi thật: chạy nền, poll tiến độ
+        const { jobId } = await api('/api/quick-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, text, parseMode, imageUrl, directFire, resume }) });
+        $('qsResultSection').hidden = false;
+        let j;
+        do {
+          j = await api('/api/job?id=' + encodeURIComponent(jobId));
+          renderJob(j);
+          if (j.status === 'running') await new Promise((r) => setTimeout(r, 1000));
+        } while (j.status === 'running');
+      }
     } catch (err) { $('qsErrorText').textContent = err.message; $('qsError').hidden = false; }
     finally { setLoading(btn, false); }
   }
 
+  function renderJob(j) {
+    const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+    const statusTxt = j.status === 'done' ? '✅ XONG' : j.status === 'error' ? ('❌ ' + esc(j.error || 'lỗi')) : ('⏳ đang gửi: ' + esc(j.current || ''));
+    $('qsResultTitle').textContent = '📤 Tiến độ gửi';
+    $('qsCount').innerHTML = `
+      <div style="min-width:340px">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:var(--fs-xs);margin-bottom:4px">
+          <span><b>${j.done}/${j.total}</b> (${pct}%) · ✓${j.ok} ↻${j.skipped} ✗${j.failed}</span>
+          <span>${statusTxt}</span>
+        </div>
+        <div style="height:8px;background:var(--clr-surface-elevated);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:var(--clr-accent);transition:width .3s"></div>
+        </div>
+      </div>`;
+    const rows = (j.items || []).slice().reverse(); // mới nhất lên trên
+    $('qsBody').innerHTML = rows.map((it, i) => {
+      const st = it.status === 'ok' ? '<span class="table-status active">đã gửi ✓</span>'
+        : it.status === 'skipped' ? '<span class="table-status">↻ bỏ qua (đã gửi)</span>'
+        : it.status === 'notfound' ? '<span class="table-status inactive">không tìm thấy</span>'
+        : `<span class="table-status inactive">✗ ${esc(it.error || 'lỗi')}</span>`;
+      return `<tr><td>${rows.length - i}</td><td>${it.employee_id}</td><td class="td-name">${esc(it.name || '')}</td><td>—</td><td>${st}</td><td class="td-msg"></td></tr>`;
+    }).join('');
+  }
+
   function renderQuick(r, isSend) {
     const items = r.items || [];
+    const parseMode = $('qsParseMode').value;
     qsLastCount = items.filter((it) => !it.notfound).length;
     $('qsSendBtn').disabled = qsLastCount === 0;
     $('qsResultSection').hidden = false;
+
+    // Hiển thị nội dung tin nhắn: render HTML khi parseMode=HTML, escape khi khác
+    const fmtMsg = (txt) => {
+      if (parseMode === 'HTML') return `<div class="msg-html-preview">${txt}</div>`;
+      return esc(txt);
+    };
+
     if (isSend) {
       $('qsResultTitle').textContent = '⚡ Đã gửi';
       $('qsCount').innerHTML = `<span class="count-num">${r.sent?.length || 0}</span> gửi OK · ${r.errors?.length || 0} lỗi`;
@@ -307,11 +427,13 @@
           <td class="td-name">${esc(it.full_name)}</td>
           <td>${esc(it.title_name || '—')}</td>
           <td>${okIds.has(it.employee_id) ? '<span class="table-status active">đã gửi ✓</span>' : `<span class="table-status inactive">${esc(errMap[it.employee_id] || 'lỗi')}</span>`}</td>
-          <td class="td-msg">${esc(it.text)}</td>
+          <td class="td-msg">${fmtMsg(it.text)}</td>
         </tr>`).join('');
     } else {
+      const modeBadge = parseMode === 'HTML' ? '🔤 HTML' : parseMode === 'MARKDOWN' ? '🔤 Markdown' : '🔤 Text';
+      const fireBadge = r.directFire ? ' · ⚡ Bắn thẳng' : '';
       $('qsResultTitle').textContent = '👀 Xem trước';
-      $('qsCount').innerHTML = `<span class="count-num">${qsLastCount}</span> sẽ gửi · ${items.length - qsLastCount} không tìm thấy`;
+      $('qsCount').innerHTML = `<span class="count-num">${qsLastCount}</span> sẽ gửi · ${items.length - qsLastCount} không tìm thấy <small style="opacity:.6">${modeBadge}${fireBadge}</small>`;
       $('qsBody').innerHTML = items.map((it, i) => `
         <tr>
           <td>${i + 1}</td>
@@ -319,7 +441,7 @@
           <td class="td-name">${esc(it.full_name)}</td>
           <td>${esc(it.title_name || '—')}</td>
           <td>${it.notfound ? '<span class="table-status inactive">không tìm thấy</span>' : (it.active ? '<span class="table-status active">đang LV</span>' : '<span class="table-status inactive">đã nghỉ</span>')}</td>
-          <td class="td-msg">${esc(it.text)}</td>
+          <td class="td-msg">${fmtMsg(it.text)}</td>
         </tr>`).join('');
     }
   }

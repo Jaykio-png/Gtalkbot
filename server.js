@@ -76,13 +76,15 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // ---- MCP proxy (giữ cho tab tra cứu của app Lookup) ----
+  // ---- MCP proxy (server TỰ gắn key từ config -> trình duyệt khỏi giữ key cũ) ----
   if (url === '/mcp-proxy' && req.method === 'POST') {
+    const cfg = await store.getConfig();
+    const key = (cfg && cfg.mcpApiKey) || req.headers['x-mcp-auth'] || '';
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' };
-      if (req.headers['x-mcp-auth']) headers['Authorization'] = req.headers['x-mcp-auth'];
+      if (key) headers['Authorization'] = key;
       if (req.headers['x-mcp-session-id']) headers['Mcp-Session-Id'] = req.headers['x-mcp-session-id'];
       const u = new URL(MCP_ENDPOINT);
       const pr = https.request({ hostname: u.hostname, path: u.pathname, method: 'POST', headers }, (pres) => {
@@ -139,7 +141,25 @@ const server = http.createServer(async (req, res) => {
         lastMaxId: roster.lastMaxId || null,
         rosterSize: emps.length,
         maxTenureDays: cfg.maxTenureDays || 60,
+        campaignCount: ((await store.getCampaigns()) || []).filter(c => c.enabled !== false).length,
       });
+    }
+
+    // Tra cứu NV từ roster local (cache) — tránh gọi API không cần thiết
+    if (url === '/api/roster-lookup' && req.method === 'POST') {
+      const body = await readBody(req);
+      const id = parseInt(body.employee_id, 10);
+      if (!Number.isFinite(id)) return sendJSON(res, 400, { error: 'Thiếu employee_id' });
+      const roster = (await store.getRoster()) || {};
+      const emp = (roster.employees || {})[String(id)];
+      if (emp) {
+        const { division, department } = parseOrg(emp.org);
+        return sendJSON(res, 200, {
+          found: true, cached: true,
+          profile: { ...emp, division, department },
+        });
+      }
+      return sendJSON(res, 200, { found: false, cached: false });
     }
 
     if ((url === '/api/preview' || url === '/api/run') && req.method === 'POST') {
@@ -155,12 +175,44 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, out);
     }
 
-    if ((url === '/api/quick-preview' || url === '/api/quick-send') && req.method === 'POST') {
+    // Xem trước: đồng bộ (nhanh)
+    if (url === '/api/quick-preview' && req.method === 'POST') {
       const { quickSend } = require('./runner');
       const body = await readBody(req);
-      const dryRun = url === '/api/quick-preview';
-      const report = await quickSend({ ids: body.ids || [], text: body.text || '', parseMode: body.parseMode || 'PLAIN_TEXT', imageUrl: body.imageUrl || '', dryRun, log: (m) => console.log('[quick]', m) });
+      const report = await quickSend({ ids: body.ids || [], text: body.text || '', parseMode: body.parseMode || 'PLAIN_TEXT', imageUrl: body.imageUrl || '', directFire: !!body.directFire, dryRun: true, log: (m) => console.log('[quick]', m) });
       return sendJSON(res, 200, report);
+    }
+
+    // Gửi thật: CHẠY NỀN, trả jobId ngay, UI poll tiến độ
+    if (url === '/api/quick-send' && req.method === 'POST') {
+      const { quickSend } = require('./runner');
+      const jobs = require('./lib/jobs');
+      const body = await readBody(req);
+      const ids = body.ids || [];
+      const total = [...new Set(ids.map((x) => parseInt(String(x).trim(), 10)).filter(Number.isFinite))].length;
+      const jobId = jobs.create(total);
+      console.log(`[quick] BẮT ĐẦU job ${jobId} | ${total} người | directFire=${!!body.directFire} resume=${!!body.resume}`);
+      quickSend({
+        ids, text: body.text || '', parseMode: body.parseMode || 'PLAIN_TEXT', imageUrl: body.imageUrl || '',
+        directFire: !!body.directFire, resume: !!body.resume, sendConcurrency: body.concurrency || 3, dryRun: false,
+        onItem: (it) => jobs.update(jobId, (j) => {
+          j.done++;
+          if (it.status === 'ok') j.ok++; else if (it.status === 'skipped') j.skipped++; else j.failed++;
+          j.current = it.full_name || ('#' + it.employee_id);
+          j.items.push({ employee_id: it.employee_id, name: it.full_name, status: it.status || 'ok', error: it.error || '' });
+        }),
+        log: (m) => console.log('[quick]', m),
+      }).then(() => jobs.update(jobId, (j) => { j.status = 'done'; j.finishedAt = Date.now(); j.current = ''; }))
+        .catch((e) => jobs.update(jobId, (j) => { j.status = 'error'; j.error = e.message; j.finishedAt = Date.now(); }));
+      return sendJSON(res, 200, { jobId, total });
+    }
+
+    // Poll tiến độ job
+    if (url === '/api/job' && req.method === 'GET') {
+      const jobs = require('./lib/jobs');
+      const id = new URL('http://x' + req.url).searchParams.get('id');
+      const j = jobs.get(id);
+      return j ? sendJSON(res, 200, j) : sendJSON(res, 404, { error: 'job không tồn tại' });
     }
   } catch (e) {
     return sendJSON(res, 500, { error: e.message });

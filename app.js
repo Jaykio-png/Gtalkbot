@@ -139,7 +139,7 @@ async function initMcpSession() {
 function updateConnectionStatus(s) {
   const el = dom.connectionStatus;
   const text = el.querySelector('.status-text');
-  el.className = 'header-status';
+  el.className = 'sidebar-status';
   if (s === 'connecting') text.textContent = 'Đang kết nối...';
   else if (s === 'connected') { el.classList.add('connected'); text.textContent = 'Đã kết nối'; }
   else { el.classList.add('error'); text.textContent = 'Lỗi kết nối'; }
@@ -172,16 +172,29 @@ async function handleSearch() {
   if (!raw) { showError('Vui lòng nhập Employee ID'); return; }
   const id = parseInt(raw, 10);
   if (isNaN(id)) { showError('Employee ID phải là số'); return; }
-  if (!state.connected) { showError('Chưa kết nối MCP Gateway'); return; }
 
   setSearchLoading(true);
   hideError();
   dom.resultSection.hidden = true;
 
   try {
+    // Phase 1: tra cứu roster local (cache) — nhanh, không gọi API gateway
+    const cacheResp = await fetch('/api/roster-lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_id: id }),
+    });
+    const cacheData = await cacheResp.json();
+    if (cacheData.found && cacheData.profile) {
+      displayResult(cacheData.profile, true);
+      return;
+    }
+
+    // Phase 2: không có trong cache → gọi MCP gateway
+    if (!state.connected) { showError('Không có trong roster local & chưa kết nối MCP Gateway'); return; }
     const data = await lookupEmployee(id, dom.includeOffToggle.checked);
     if (!data.found) { showError(`Không tìm thấy nhân viên: ${id}`); return; }
-    displayResult(data.profile);
+    displayResult(data.profile, false);
   } catch (err) {
     showError(`Lỗi: ${err.message}`);
   } finally {
@@ -189,7 +202,7 @@ async function handleSearch() {
   }
 }
 
-function displayResult(p) {
+function displayResult(p, fromCache = false) {
   const names = p.full_name.split(' ');
   dom.resultAvatar.textContent = names.length >= 2
     ? names[0][0] + names[names.length - 1][0]
@@ -198,7 +211,7 @@ function displayResult(p) {
   dom.resultName.textContent = p.full_name;
   dom.resultTitle.textContent = p.title_name || 'Không có chức danh';
 
-  const active = p.status === 1 || p.status_text?.toLowerCase().includes('working');
+  const active = p.status === 1 || p.status_text?.toLowerCase().includes('working') || p.status_text?.includes('đang làm');
   dom.resultStatus.textContent = active ? 'Đang làm việc' : (p.status_text || 'Đã nghỉ');
   dom.resultStatus.className = `status-badge ${active ? 'active' : 'inactive'}`;
 
@@ -218,6 +231,16 @@ function displayResult(p) {
   }
 
   dom.infoWorkingDays.textContent = `${calcWorkingDays(p).toLocaleString('vi-VN')} ngày`;
+
+  // Source badge
+  const existingBadge = document.querySelector('.source-badge');
+  if (existingBadge) existingBadge.remove();
+  const badge = document.createElement('span');
+  badge.className = 'source-badge';
+  badge.style.cssText = `font-size:0.7rem;padding:2px 8px;border-radius:20px;margin-left:8px;font-weight:500;${fromCache ? 'background:var(--clr-accent-subtle);color:var(--clr-accent-text);' : 'background:var(--clr-surface-elevated);color:var(--clr-text-muted);'}`;
+  badge.textContent = fromCache ? '⚡ roster local' : '🌐 MCP API';
+  dom.resultName.appendChild(badge);
+
   dom.resultSection.hidden = false;
 }
 

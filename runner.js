@@ -42,20 +42,32 @@ async function run({ dryRun = true, sync = null, log = () => {}, now = new Date(
 
   if (campaigns.length === 0) { report.note = 'Chưa có lộ trình nào đang bật.'; return report; }
 
-  // 2) Tra cứu các ID cố định (targetIds) — có thể là người cũ không có trong roster
+  // 2) Tra cứu các ID cố định (targetIds) — CACHE-FIRST: dùng roster local trước, chỉ gọi API cho ID thiếu
+  const rosterData = (await store.getRoster()) || {};
+  const rosterEmployees = rosterData.employees || {};
   const targetIds = [...new Set(campaigns.flatMap((c) => (c.targetIds || []).map(Number)).filter(Number.isFinite))];
   const profilesById = {};
   if (targetIds.length) {
-    if (!mcp) { mcp = new McpClient(config.mcpApiKey); await mcp.connect(); }
-    log(`Tra cứu ${targetIds.length} ID cố định...`);
-    let i = 0;
-    const worker = async () => {
-      while (i < targetIds.length) {
-        const id = targetIds[i++];
-        try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) profilesById[r.profile.employee_id] = r.profile; } catch { /* bỏ qua */ }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(8, targetIds.length) }, worker));
+    // Phase 1: tra roster local
+    const missingIds = [];
+    for (const id of targetIds) {
+      const cached = rosterEmployees[String(id)];
+      if (cached) { profilesById[id] = cached; }
+      else { missingIds.push(id); }
+    }
+    log(`Tra cứu ${targetIds.length} ID cố định → ${targetIds.length - missingIds.length} có sẵn trong roster, ${missingIds.length} cần gọi API.`);
+    // Phase 2: chỉ gọi API cho ID chưa có
+    if (missingIds.length) {
+      if (!mcp) { mcp = new McpClient(config.mcpApiKey); await mcp.connect(); }
+      let i = 0;
+      const worker = async () => {
+        while (i < missingIds.length) {
+          const id = missingIds[i++];
+          try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) profilesById[r.profile.employee_id] = r.profile; } catch { /* bỏ qua */ }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(8, missingIds.length) }, worker));
+    }
   }
 
   // 3) Khớp -> tin cần gửi hôm nay
@@ -80,7 +92,7 @@ async function run({ dryRun = true, sync = null, log = () => {}, now = new Date(
       let res;
       if (s.imageUrl) {
         const img = await getImg(s.imageUrl);
-        res = await gtalk.sendImageToEmployee(s.employee.employee_id, img, s.text);
+        res = await gtalk.sendImageToEmployee(s.employee.employee_id, img, s.text, s.parseMode);
       } else {
         res = await gtalk.sendToEmployee(s.employee.employee_id, s.text, s.parseMode);
       }
@@ -96,9 +108,12 @@ async function run({ dryRun = true, sync = null, log = () => {}, now = new Date(
 
 /**
  * GỬI NGAY theo danh sách employee_id (không cần mốc ngày).
- * @param {{ids:Array, text:string, dryRun:boolean, log?:function}}
+ * directFire = true → bắn thẳng, KHÔNG crawl/lookup MCP, chỉ cần employee_id.
+ * @param {{ids:Array, text:string, dryRun:boolean, directFire:boolean, log?:function}}
  */
-async function quickSend({ ids = [], text = '', parseMode = 'PLAIN_TEXT', imageUrl = '', dryRun = true, log = () => {} } = {}) {
+function hashKey(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); }
+
+async function quickSend({ ids = [], text = '', parseMode = 'PLAIN_TEXT', imageUrl = '', dryRun = true, directFire = false, resume = false, sendConcurrency = 3, onItem = null, log = () => {} } = {}) {
   const config = await store.getConfig();
   if (!config) throw new Error('Chưa có cấu hình (env hoặc data/config.json).');
   imageUrl = (imageUrl || '').trim();
@@ -107,44 +122,95 @@ async function quickSend({ ids = [], text = '', parseMode = 'PLAIN_TEXT', imageU
   const cleanIds = [...new Set(ids.map((x) => parseInt(String(x).trim(), 10)).filter(Number.isFinite))];
   if (cleanIds.length === 0) throw new Error('Chưa có employee_id hợp lệ.');
 
-  const mcp = new McpClient(config.mcpApiKey);
-  await mcp.connect();
+  let byId = new Map();
 
-  // tra cứu song song (pool nhỏ); KHỚP THEO employee_id trả về, không theo vị trí
-  const byId = new Map();
-  let idx = 0;
-  const worker = async () => {
-    while (idx < cleanIds.length) {
-      const id = cleanIds[idx++];
-      try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) byId.set(r.profile.employee_id, r.profile); }
-      catch { /* bỏ qua */ }
+  if (directFire) {
+    // === CHẾ ĐỘ BẮN THẲNG: không crawl MCP, chỉ dùng roster local (nếu có) để hiển thị tên ===
+    const rosterData = (await store.getRoster()) || {};
+    const rosterEmployees = rosterData.employees || {};
+    for (const id of cleanIds) {
+      const cached = rosterEmployees[String(id)];
+      // Dùng cache nếu có (chỉ để hiện tên), nếu không thì tạo placeholder
+      byId.set(id, cached || { employee_id: id, full_name: `NV #${id}`, title_name: '', status: 1, status_text: 'đang làm việc' });
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(8, cleanIds.length) }, worker));
+    log(`⚡ Bắn thẳng: ${cleanIds.length} ID — không crawl MCP.`);
+  } else {
+    // === CHẾ ĐỘ THƯỜNG: cache-first, lookup thiếu ===
+    const rosterData = (await store.getRoster()) || {};
+    const rosterEmployees = rosterData.employees || {};
+    const missingIds = [];
+    for (const id of cleanIds) {
+      const cached = rosterEmployees[String(id)];
+      if (cached) { byId.set(id, cached); }
+      else { missingIds.push(id); }
+    }
+    log(`Gửi nhanh: ${cleanIds.length} ID → ${cleanIds.length - missingIds.length} có sẵn trong roster, ${missingIds.length} cần gọi API.`);
+
+    // Chỉ gọi MCP API cho các ID chưa có trong roster
+    if (missingIds.length) {
+      const mcp = new McpClient(config.mcpApiKey);
+      await mcp.connect();
+      const pool = Math.min(3, missingIds.length);
+      let idx = 0;
+      const worker = async () => {
+        while (idx < missingIds.length) {
+          const id = missingIds[idx++];
+          try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) byId.set(r.profile.employee_id, r.profile); }
+          catch { /* bỏ qua */ }
+        }
+      };
+      await Promise.all(Array.from({ length: pool }, worker));
+      // MOP-UP: ID nào vẫn chưa thấy -> tra lại TUẦN TỰ
+      for (const id of missingIds) {
+        if (byId.has(id)) continue;
+        try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) byId.set(r.profile.employee_id, r.profile); }
+        catch { /* bỏ qua */ }
+      }
+    }
+  }
 
   const items = cleanIds.map((id) => {
     const p = byId.get(id);
     if (!p) return { employee_id: id, full_name: '(không tìm thấy)', notfound: true, text: '' };
-    const active = p.status === 1 || (p.status_text || '').includes('đang làm');
-    return { employee_id: id, full_name: p.full_name, title_name: p.title_name, active, notfound: false, text: renderMessage(text, p) };
+    const active = directFire ? true : (p.status === 1 || (p.status_text || '').includes('đang làm'));
+    return { employee_id: id, full_name: p.full_name, title_name: p.title_name || '', active, notfound: false, text: renderMessage(text, p) };
   });
 
-  const report = { dryRun, count: cleanIds.length, items, sent: [], errors: [] };
+  const report = { dryRun, directFire, count: cleanIds.length, items, sent: [], errors: [] };
   if (dryRun) return report;
 
   const gtalk = new GtalkClient({ oaId: config.oaId, oaToken: config.oaToken, env: config.env || 'prod' });
   const img = imageUrl ? await resolveImage(imageUrl) : null;
-  for (const it of items) {
-    if (it.notfound) { report.errors.push({ employee_id: it.employee_id, error: 'không tìm thấy nhân viên' }); continue; }
+  const sentLog = await store.getSentLog();
+  const bkey = 'blast:' + hashKey(`${parseMode}|${imageUrl}|${text}`); // khóa nhận diện "mẻ bắn" (để resume)
+  let i = 0, persisted = 0;
+
+  const sendOne = async (it) => {
+    if (it.notfound && !directFire) {
+      it.status = 'notfound';
+      report.errors.push({ employee_id: it.employee_id, error: 'không tìm thấy nhân viên' });
+      if (onItem) onItem(it); return;
+    }
+    const logKey = `${bkey}:${it.employee_id}`;
+    if (resume && sentLog[logKey]) { it.status = 'skipped'; if (onItem) onItem(it); return; }
     try {
       const res = img
-        ? await gtalk.sendImageToEmployee(it.employee_id, img, it.text)
+        ? await gtalk.sendImageToEmployee(it.employee_id, img, it.text, parseMode)
         : await gtalk.sendToEmployee(it.employee_id, it.text, parseMode);
+      sentLog[logKey] = { at: new Date().toISOString() };
+      it.status = 'ok';
       report.sent.push({ employee_id: it.employee_id, full_name: it.full_name, ...res });
     } catch (e) {
+      it.status = 'error'; it.error = e.message;
       report.errors.push({ employee_id: it.employee_id, full_name: it.full_name, error: e.message });
     }
-  }
+    if (onItem) onItem(it);
+    if (++persisted % 25 === 0) { try { await store.setSentLog(sentLog); } catch { /* */ } }
+  };
+
+  const conc = Math.min(sendConcurrency || 3, items.length || 1);
+  await Promise.all(Array.from({ length: conc }, async () => { while (i < items.length) await sendOne(items[i++]); }));
+  try { await store.setSentLog(sentLog); } catch { /* */ }
   return report;
 }
 
