@@ -28,9 +28,11 @@
   $('tabCampaigns').addEventListener('click', () => switchTab('campaigns'));
   $('tabRun').addEventListener('click', () => switchTab('run'));
   $('tabQuick').addEventListener('click', () => switchTab('quick'));
+  $('tabData').addEventListener('click', () => switchTab('data'));
   document.addEventListener('tabchange', (e) => {
     if (e.detail === 'campaigns') loadComposer();
     if (e.detail === 'run') loadRunStatus();
+    if (e.detail === 'data') loadDataset();
   });
 
   /* ---------- Sub-tab wiring ---------- */
@@ -112,6 +114,7 @@
     $('cmpStartDate').value = (c.startDate || '').slice(0, 10);
     $('cmpTargetIds').value = (c.targetIds || []).join(', ');
     $('cmpParseMode').value = c.parseMode || 'PLAIN_TEXT';
+    $('cmpSendTime').value = c.sendTime || '';
     toggleStartDate();
     fillMulti($('cmpTitles'), state.facets.titles, c.audience?.titles || []);
     fillMulti($('cmpDivisions'), state.facets.divisions, c.audience?.divisions || []);
@@ -186,6 +189,7 @@
     c.startDate = c.anchorMode === 'campaign' ? ($('cmpStartDate').value || '') : '';
     c.targetIds = parseIds($('cmpTargetIds').value);
     c.parseMode = $('cmpParseMode').value;
+    c.sendTime = /^([01]\d|2[0-3]):[0-5]\d$/.test($('cmpSendTime').value) ? $('cmpSendTime').value : '';
     c.audience = {
       titles: getMulti($('cmpTitles')),
       divisions: getMulti($('cmpDivisions')),
@@ -211,14 +215,219 @@
   async function loadRunStatus() {
     try {
       const s = await api('/api/status');
+      const runs = s.scanStats?.runsToday ? ` · ${s.scanStats.runsToday} lượt` : '';
       $('runStatus').innerHTML = `
         <span class="run-pill">Môi trường: <b>${esc(s.env)}</b></span>
         <span class="run-pill">Roster: <b>${s.rosterSize}</b> NV</span>
         <span class="run-pill">ID mới nhất đã quét: <b>${s.lastMaxId ?? '—'}</b></span>
         <span class="run-pill">Cửa sổ: <b>≤ ${s.maxTenureDays} ngày</b></span>
-        <span class="run-pill">Lộ trình: <b>${s.campaignCount}</b></span>`;
+        <span class="run-pill">Lộ trình: <b>${s.campaignCount}</b></span>
+        <span class="run-pill">🔄 Crawl hôm nay: <b>${s.crawledToday ?? 0}</b> NV mới${runs}</span>`;
     } catch (err) { $('runStatus').textContent = 'Lỗi tải trạng thái: ' + err.message; }
   }
+
+  /* ================= BỘ DỮ LIỆU: 2 luồng crawl + danh sách ================= */
+  const fmtDate = (s) => { if (!s || s === '0001-01-01T00:00:00Z') return '—'; const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleDateString('vi-VN'); };
+  let crawlPoll = null;
+
+  async function pollCrawl() {
+    try {
+      const c = await api('/api/crawl-status');
+      const msg = $('dataCrawlMsg'); msg.hidden = false;
+      if (c.running) { msg.textContent = (c.mode === 'seed' ? '🌱 Đang seed (crawl lùi)' : '🔄 Đang crawl tiến') + '...'; return; }
+      clearInterval(crawlPoll); crawlPoll = null;
+      setLoading($('dataSeedBtn'), false); setLoading($('dataCrawlBtn'), false);
+      if (c.error) {
+        msg.textContent = '❌ Lỗi: ' + c.error;
+      } else {
+        const n = c.scanStats?.lastRunFound ?? 0;
+        msg.textContent = `✓ Xong (${c.mode === 'seed' ? 'seed' : 'tiến'}): +${n} NV mới (hôm nay tổng ${c.scanStats?.foundToday ?? n}).`;
+      }
+      loadDataset();
+    } catch { /* tiếp tục poll */ }
+  }
+
+  function startCrawlFlow(endpoint, btn, payload = {}) {
+    if (crawlPoll) return;
+    setLoading(btn, true);
+    const msg = $('dataCrawlMsg'); msg.hidden = false; msg.textContent = '⏳ Bắt đầu...';
+    api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(() => { crawlPoll = setInterval(pollCrawl, 2000); })
+      .catch((err) => { setLoading(btn, false); msg.textContent = '❌ ' + err.message; });
+  }
+
+  async function loadDataStatus() {
+    try {
+      const s = await api('/api/status');
+      const ss = s.scanStats;
+      const lastRun = ss?.lastRunAt ? new Date(ss.lastRunAt).toLocaleString('vi-VN') : '—';
+      $('dataStatus').innerHTML = `
+        <span class="run-pill">Bộ dữ liệu: <b>${s.rosterSize}</b> NV</span>
+        <span class="run-pill">ID mới nhất: <b>${s.lastMaxId ?? '—'}</b></span>
+        <span class="run-pill">🌱 Crawl hôm nay: <b>${s.crawledToday ?? 0}</b> NV mới${ss?.runsToday ? ` · ${ss.runsToday} lượt` : ''}</span>
+        <span class="run-pill">Lần cuối: <b>${esc(lastRun)}</b>${ss?.lastMode ? ` (${ss.lastMode === 'seed' ? 'seed' : 'tiến'})` : ''}</span>`;
+    } catch (err) { $('dataStatus').textContent = 'Lỗi tải trạng thái: ' + err.message; }
+  }
+
+  // ----- Bảng dữ liệu: lưu hàng + sort theo cột + phân trang -----
+  let datasetRows = [];
+  let dataSort = { key: 'workingDays', asc: true };
+  let dataPage = 1;
+  let dataPageSize = 50;
+  const isActive = (p) => p.status === 1 || (p.status_text || '').includes('đang làm');
+  const sortVal = (p, key) => {
+    switch (key) {
+      case 'dept': return (p.department || p.division || '').toLowerCase();
+      case 'active': return isActive(p) ? 1 : 0;
+      case 'start_working_date': { const t = new Date(p.start_working_date).getTime(); return Number.isFinite(t) ? t : 0; }
+      case 'full_name': case 'title_name': return String(p[key] || '').toLowerCase();
+      default: return Number(p[key]) || 0; // workingDays, employee_id
+    }
+  };
+
+  // Lọc theo các select; trả về danh sách đã lọc (chưa sort/phân trang)
+  function filteredRows() {
+    const fT = $('dataFilterTitle').value, fD = $('dataFilterDept').value, fS = $('dataFilterStatus').value, fDay = $('dataFilterDays').value;
+    return datasetRows.filter((p) => {
+      if (fT && (p.title_name || '') !== fT) return false;
+      if (fD && (p.department || p.division || '') !== fD) return false;
+      if (fS === 'active' && !isActive(p)) return false;
+      if (fS === 'off' && isActive(p)) return false;
+      if (fDay !== '' && String(p.workingDays ?? '') !== fDay) return false;
+      return true;
+    });
+  }
+
+  // Đổ tùy chọn cho các select lọc từ dữ liệu thực
+  function populateDataFilters() {
+    const fill = (sel, values) => {
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">Tất cả</option>' + values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+      if (values.map(String).includes(cur)) sel.value = cur;
+    };
+    const uniq = (arr) => [...new Set(arr)];
+    fill($('dataFilterTitle'), uniq(datasetRows.map((p) => p.title_name).filter(Boolean)).sort((a, b) => a.localeCompare(b, 'vi')));
+    fill($('dataFilterDept'), uniq(datasetRows.map((p) => p.department || p.division).filter(Boolean)).sort((a, b) => a.localeCompare(b, 'vi')));
+    fill($('dataFilterDays'), uniq(datasetRows.map((p) => p.workingDays).filter((v) => v != null)).sort((a, b) => a - b).map(String));
+  }
+
+  function renderDataRows() {
+    const body = $('dataBody');
+    // mũi tên chỉ hướng sort trên cột đang chọn
+    document.querySelectorAll('#panelData th.col-sort').forEach((th) => {
+      const a = th.querySelector('.sort-arrow');
+      if (a) a.textContent = th.dataset.key === dataSort.key ? (dataSort.asc ? ' ▲' : ' ▼') : '';
+    });
+    if (!datasetRows.length) {
+      body.innerHTML = '<tr class="no-results-row"><td colspan="8">Chưa có dữ liệu. Bấm “🌱 Seed base (lùi)” để bắt đầu.</td></tr>';
+      $('dataCount').innerHTML = '';
+      $('dataPageInfo').textContent = '';
+      $('dataPrev').disabled = $('dataNext').disabled = true;
+      return;
+    }
+    const base = filteredRows();
+    const total = base.length;
+    $('dataCount').innerHTML = total === datasetRows.length
+      ? `<span class="count-num">${total}</span> NV`
+      : `<span class="count-num">${total}</span> / ${datasetRows.length} NV`;
+    if (!total) {
+      body.innerHTML = '<tr class="no-results-row"><td colspan="8">Không có NV khớp bộ lọc.</td></tr>';
+      $('dataPageInfo').textContent = '';
+      $('dataPrev').disabled = $('dataNext').disabled = true;
+      return;
+    }
+    const sorted = base.sort((a, b) => {
+      const va = sortVal(a, dataSort.key), vb = sortVal(b, dataSort.key);
+      const r = typeof va === 'string' ? va.localeCompare(vb, 'vi') : (va - vb);
+      return dataSort.asc ? r : -r;
+    });
+    const pages = Math.max(1, Math.ceil(total / dataPageSize));
+    if (dataPage > pages) dataPage = pages;
+    const start = (dataPage - 1) * dataPageSize;
+    const slice = sorted.slice(start, start + dataPageSize);
+    body.innerHTML = slice.map((p, i) => {
+      const active = isActive(p);
+      return `<tr>
+        <td>${start + i + 1}</td>
+        <td class="td-days">${(p.workingDays ?? 0).toLocaleString('vi-VN')}</td>
+        <td>${esc(p.full_name)}</td>
+        <td>${esc(p.employee_id)}</td>
+        <td>${esc(p.title_name || '—')}</td>
+        <td>${esc(p.department || p.division || '—')}</td>
+        <td>${fmtDate(p.start_working_date)}</td>
+        <td><span class="table-status ${active ? 'active' : 'inactive'}">${active ? 'Đang LV' : 'Đã nghỉ'}</span></td>
+      </tr>`;
+    }).join('');
+    $('dataPageInfo').textContent = `Trang ${dataPage}/${pages} · ${start + 1}–${start + slice.length} / ${total} NV`;
+    $('dataPrev').disabled = dataPage <= 1;
+    $('dataNext').disabled = dataPage >= pages;
+  }
+
+  // Bấm tiêu đề cột để sort; bấm lại đảo chiều (về trang 1)
+  document.querySelectorAll('#panelData th.col-sort').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      if (dataSort.key === key) dataSort.asc = !dataSort.asc;
+      else { dataSort.key = key; dataSort.asc = true; }
+      dataPage = 1;
+      renderDataRows();
+    });
+  });
+
+  // Phân trang
+  $('dataPageSize')?.addEventListener('change', (e) => { dataPageSize = parseInt(e.target.value, 10) || 50; dataPage = 1; renderDataRows(); });
+  $('dataPrev')?.addEventListener('click', () => { if (dataPage > 1) { dataPage--; renderDataRows(); } });
+  $('dataNext')?.addEventListener('click', () => { dataPage++; renderDataRows(); });
+
+  // Lọc (xổ xuống) — đổi là về trang 1
+  ['dataFilterTitle', 'dataFilterDept', 'dataFilterStatus', 'dataFilterDays'].forEach((id) => {
+    $(id)?.addEventListener('change', () => { dataPage = 1; renderDataRows(); });
+  });
+  $('dataClearFilters')?.addEventListener('click', () => {
+    ['dataFilterTitle', 'dataFilterDept', 'dataFilterStatus', 'dataFilterDays'].forEach((id) => { $(id).value = ''; });
+    dataPage = 1; renderDataRows();
+  });
+
+  async function loadDataset() {
+    loadDataStatus();
+    loadSchedule();
+    const body = $('dataBody');
+    body.innerHTML = '<tr><td colspan="8">Đang tải...</td></tr>';
+    try {
+      const d = await api('/api/dataset');
+      datasetRows = d.employees || [];
+      dataPage = 1;
+      populateDataFilters();
+      renderDataRows();
+    } catch (err) { body.innerHTML = `<tr><td colspan="8">Lỗi: ${esc(err.message)}</td></tr>`; }
+  }
+
+  // ----- Lịch tự động (scheduler nội bộ) -----
+  async function loadSchedule() {
+    try {
+      const s = await api('/api/schedule');
+      $('schCrawlEnabled').checked = !!s.crawlEnabled;
+      $('schCrawlTime').value = s.crawlTime || '07:00';
+    } catch { /* để mặc định */ }
+  }
+  $('schSaveBtn')?.addEventListener('click', async () => {
+    const payload = { crawlEnabled: $('schCrawlEnabled').checked, crawlTime: $('schCrawlTime').value };
+    $('schMsg').textContent = '⏳ đang lưu...';
+    try {
+      const r = await api('/api/schedule', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const c = r.schedule;
+      $('schMsg').textContent = `✓ Đã lưu — tự crawl ${c.crawlEnabled ? c.crawlTime + ' (tiến)' : 'tắt'}. Bắn Bot theo giờ từng lộ trình.`;
+    } catch (err) { $('schMsg').textContent = '❌ ' + err.message; }
+  });
+
+  $('dataSeedBtn')?.addEventListener('click', () => {
+    const fromId = parseInt($('dataSeedId').value, 10);
+    if (!Number.isFinite(fromId) || fromId <= 0) { alert('Nhập "ID mới nhất" trước khi Seed nhé.'); $('dataSeedId').focus(); return; }
+    if (!confirm(`Seed sẽ crawl LÙI từ ID ${fromId} để lấy base NV mới (thâm niên 1 ngày), quét tối đa 500 ID. Thường chỉ chạy 1 lần. Tiếp tục?`)) return;
+    startCrawlFlow('/api/seed', $('dataSeedBtn'), { fromId });
+  });
+  $('dataCrawlBtn')?.addEventListener('click', () => startCrawlFlow('/api/crawl', $('dataCrawlBtn')));
+  $('dataRefreshBtn')?.addEventListener('click', () => loadDataset());
 
   let lastPreviewCount = 0;
   const setLoading = (btn, on) => { btn.classList.toggle('loading', on); btn.disabled = on; };
@@ -341,6 +550,13 @@
   });
 
   let qsLastCount = 0;
+  $('qsFailCopy').addEventListener('click', () => {
+    const ta = $('qsFailIds');
+    ta.select();
+    navigator.clipboard?.writeText(ta.value).catch(() => {});
+    const btn = $('qsFailCopy'); const old = btn.textContent;
+    btn.textContent = '✓ Đã copy'; setTimeout(() => { btn.textContent = old; }, 1500);
+  });
   $('qsPreviewBtn').addEventListener('click', () => doQuick('/api/quick-preview', false));
   $('qsSendBtn').addEventListener('click', () => {
     if (!confirm(`Gửi NGAY ${qsLastCount} tin nhắn qua GTalk?`)) return;
@@ -400,6 +616,27 @@
         : `<span class="table-status inactive">✗ ${esc(it.error || 'lỗi')}</span>`;
       return `<tr><td>${rows.length - i}</td><td>${it.employee_id}</td><td class="td-name">${esc(it.name || '')}</td><td>—</td><td>${st}</td><td class="td-msg"></td></tr>`;
     }).join('');
+    renderFailSummary((j.items || [])
+      .filter((it) => it.status === 'error')
+      .map((it) => ({ employee_id: it.employee_id, name: it.name, error: it.error })));
+  }
+
+  // Bảng tổng hợp các ID gửi lỗi (đa số do tạo channel thất bại) — có nút copy để dán lại gửi lại.
+  function renderFailSummary(fails) {
+    const box = $('qsFailSummary');
+    if (!box) return;
+    if (!fails || !fails.length) { box.hidden = true; return; }
+    box.hidden = false;
+    const ids = fails.map((f) => f.employee_id);
+    $('qsFailCount').textContent = fails.length;
+    $('qsFailIds').value = ids.join(', ');
+    // Gom theo loại lỗi để biết bao nhiêu ca là do tạo channel
+    const byErr = {};
+    fails.forEach((f) => { const k = (f.error || 'lỗi không rõ').trim(); (byErr[k] = byErr[k] || []).push(f.employee_id); });
+    $('qsFailDetail').innerHTML = Object.entries(byErr)
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([err, list]) => `<div>• <b>${list.length}</b> · ${esc(err)} <span style="opacity:.6">(${list.join(', ')})</span></div>`)
+      .join('');
   }
 
   function renderQuick(r, isSend) {
@@ -429,6 +666,7 @@
           <td>${okIds.has(it.employee_id) ? '<span class="table-status active">đã gửi ✓</span>' : `<span class="table-status inactive">${esc(errMap[it.employee_id] || 'lỗi')}</span>`}</td>
           <td class="td-msg">${fmtMsg(it.text)}</td>
         </tr>`).join('');
+      renderFailSummary((r.errors || []).map((e) => ({ employee_id: e.employee_id, name: e.full_name, error: e.error })));
     } else {
       const modeBadge = parseMode === 'HTML' ? '🔤 HTML' : parseMode === 'MARKDOWN' ? '🔤 Markdown' : '🔤 Text';
       const fireBadge = r.directFire ? ' · ⚡ Bắn thẳng' : '';
@@ -443,6 +681,7 @@
           <td>${it.notfound ? '<span class="table-status inactive">không tìm thấy</span>' : (it.active ? '<span class="table-status active">đang LV</span>' : '<span class="table-status inactive">đã nghỉ</span>')}</td>
           <td class="td-msg">${fmtMsg(it.text)}</td>
         </tr>`).join('');
+      renderFailSummary([]); // xem trước: chưa gửi nên ẩn bảng lỗi
     }
   }
 })();

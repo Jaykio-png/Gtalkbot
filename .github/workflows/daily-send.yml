@@ -1,5 +1,10 @@
 name: Gửi tin hằng ngày (GTalk Campaign)
 
+# ====== KHUNG GIỜ GỬI (chỉ bắn Bot, KHÔNG crawl — roster do job crawl đã quét) ======
+# Sửa dòng cron bên dưới để đổi giờ. Cron tính theo giờ UTC; VN = UTC + 7.
+#   '0 1 * * *'  -> 01:00 UTC = 08:00 VN  (mặc định: gửi SAU giờ crawl 1 tiếng)
+#   '0 2 * * *'  -> 02:00 UTC = 09:00 VN
+# Lưu ý: nên để giờ gửi MUỘN HƠN giờ crawl (xem .github/workflows/daily-crawl.yml).
 on:
   schedule:
     - cron: '0 1 * * *'   # 01:00 UTC = 08:00 giờ VN
@@ -14,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Gửi tin theo lộ trình
+      - name: Gửi tin theo lộ trình (không crawl)
         run: node runner.js --run
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

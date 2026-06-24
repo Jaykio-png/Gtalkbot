@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./lib/store');
-const { parseOrg } = require('./lib/match');
+const { parseOrg, workingDays } = require('./lib/match');
 const { saveUpload } = require('./lib/image');
 
 const PORT = process.env.PORT || 8090;
@@ -26,9 +26,9 @@ function sendJSON(res, status, obj) {
 
 function readBody(req) {
   return new Promise((resolve) => {
-    let b = '';
-    req.on('data', (c) => (b += c));
-    req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); } });
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { const b = Buffer.concat(chunks).toString('utf8'); try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); } });
   });
 }
 
@@ -53,6 +53,24 @@ const APP_PASSWORD = String(process.env.APP_PASSWORD || '').trim() || 'Lodoteam@
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // phiên sống 7 ngày
 const COOKIE = 'gt_sid';
 const SESSIONS = new Map(); // sid -> thời điểm hết hạn (ms)
+
+// Trạng thái crawl NV mới (chạy nền, UI poll /api/crawl-status). mode: 'seed' (lùi) | 'daily' (tiến)
+let crawlState = { running: false, mode: null, startedAt: null, finishedAt: null, error: null, scanStats: null };
+
+// Chạy 1 luồng crawl trong nền (seed hoặc daily) — dùng chung cho /api/seed và /api/crawl
+function startCrawl(mode, runner, cfg) {
+  crawlState = { running: true, mode, startedAt: Date.now(), finishedAt: null, error: null, scanStats: null };
+  (async () => {
+    const { McpClient } = require('./lib/mcp');
+    const roster = require('./lib/roster');
+    const mcp = new McpClient(cfg.mcpApiKey);
+    await mcp.connect();
+    const { state } = await runner(roster, mcp, cfg);
+    crawlState.scanStats = state.scanStats || null;
+  })()
+    .then(() => { crawlState.running = false; crawlState.finishedAt = Date.now(); })
+    .catch((e) => { crawlState.running = false; crawlState.finishedAt = Date.now(); crawlState.error = e.message; console.error(`[${mode}] lỗi:`, e.message); });
+}
 
 function newSession() {
   const sid = crypto.randomBytes(24).toString('hex');
@@ -155,6 +173,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!Array.isArray(body)) return sendJSON(res, 400, { error: 'cần một mảng lộ trình' });
       await store.setCampaigns(body);
+      require('./lib/scheduler').setCampaigns(body); // scheduler dùng giờ gửi riêng từng lộ trình
       return sendJSON(res, 200, { ok: true, count: body.length });
     }
 
@@ -180,6 +199,9 @@ const server = http.createServer(async (req, res) => {
       let roster = {}, supaErr = null;
       try { roster = (await store.getRoster()) || {}; } catch (e) { supaErr = e.message; }
       const emps = Object.values(roster.employees || {});
+      const vnToday = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+      const ss = roster.scanStats || null;
+      const crawledToday = ss && ss.date === vnToday ? ss.foundToday : 0;
       return sendJSON(res, 200, {
         build: 'diag1',
         env: cfg.env || 'prod',
@@ -192,6 +214,9 @@ const server = http.createServer(async (req, res) => {
         rosterSize: emps.length,
         maxTenureDays: cfg.maxTenureDays || 60,
         campaignCount: ((await store.getCampaigns()) || []).filter(c => c.enabled !== false).length,
+        crawledToday,                 // số NV mới crawl được hôm nay (giờ VN)
+        scanStats: ss,                // chi tiết: scannedToday, foundToday, runsToday, lastRunAt...
+        crawlRunning: crawlState.running,
       });
     }
 
@@ -215,7 +240,8 @@ const server = http.createServer(async (req, res) => {
     if ((url === '/api/preview' || url === '/api/run') && req.method === 'POST') {
       const { run } = require('./runner');
       const dryRun = url === '/api/preview';
-      const report = await run({ dryRun, log: (m) => console.log('[run]', m) });
+      // sync:false → chỉ bắn theo danh sách đã crawl, KHÔNG crawl mới (crawl là việc riêng)
+      const report = await run({ dryRun, sync: false, log: (m) => console.log('[run]', m) });
       return sendJSON(res, 200, { ...report, sends: (report.sends || []).map(slimSend) });
     }
 
@@ -257,6 +283,58 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { jobId, total });
     }
 
+    // LUỒNG A — Seed base "ngày 0" (crawl LÙI từ ID người dùng nhập). Chạy nền, poll /api/crawl-status.
+    if (url === '/api/seed' && req.method === 'POST') {
+      if (crawlState.running) return sendJSON(res, 409, { error: 'Đang crawl rồi, đợi lượt hiện tại xong nhé.' });
+      const cfg = await store.getConfig();
+      if (!cfg) return sendJSON(res, 400, { error: 'Chưa có cấu hình (env hoặc data/config.json).' });
+      const body = await readBody(req);
+      const fromId = parseInt(body.fromId, 10);
+      startCrawl('seed', (roster, mcp, c) => roster.seed(mcp, c, { fromId: Number.isFinite(fromId) ? fromId : null, log: (m) => console.log('[seed]', m) }), cfg);
+      return sendJSON(res, 200, { ok: true, started: true, mode: 'seed' });
+    }
+
+    // LUỒNG B — Crawl tiến hằng ngày (NV mới mọc thêm, giữ ngày-0). Chạy nền, poll /api/crawl-status.
+    if (url === '/api/crawl' && req.method === 'POST') {
+      if (crawlState.running) return sendJSON(res, 409, { error: 'Đang crawl rồi, đợi lượt hiện tại xong nhé.' });
+      const cfg = await store.getConfig();
+      if (!cfg) return sendJSON(res, 400, { error: 'Chưa có cấu hình (env hoặc data/config.json).' });
+      startCrawl('daily', (roster, mcp, c) => roster.sync(mcp, c, (m) => console.log('[crawl]', m)), cfg);
+      return sendJSON(res, 200, { ok: true, started: true, mode: 'daily' });
+    }
+
+    // Trạng thái crawl (UI poll)
+    if (url === '/api/crawl-status' && req.method === 'GET') {
+      return sendJSON(res, 200, crawlState);
+    }
+
+    // Bộ dữ liệu: trả danh sách NV trong roster + thâm niên TÍNH TẠI THỜI ĐIỂM XEM (tự cộng dồn theo ngày)
+    if (url === '/api/dataset' && req.method === 'GET') {
+      const r = (await store.getRoster()) || {};
+      const employees = Object.values(r.employees || {}).map((p) => {
+        const { division, department } = parseOrg(p.org);
+        return { ...p, division, department, workingDays: workingDays(p) };
+      });
+      employees.sort((a, b) => (a.workingDays ?? 0) - (b.workingDays ?? 0) || a.employee_id - b.employee_id);
+      return sendJSON(res, 200, { count: employees.length, lastMaxId: r.lastMaxId || null, scanStats: r.scanStats || null, employees });
+    }
+
+    // Lịch tự động: đọc/lưu giờ crawl & gửi (scheduler nội bộ đọc từ đây)
+    if (url === '/api/schedule' && req.method === 'GET') {
+      return sendJSON(res, 200, await store.getSchedule());
+    }
+    if (url === '/api/schedule' && req.method === 'PUT') {
+      const body = await readBody(req);
+      const isHHMM = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s || ''));
+      const clean = {
+        crawlEnabled: !!body.crawlEnabled,
+        crawlTime: isHHMM(body.crawlTime) ? body.crawlTime : '07:00',
+      };
+      await store.setSchedule(clean);
+      require('./lib/scheduler').setSchedule(clean); // cập nhật lịch đang chạy ngay
+      return sendJSON(res, 200, { ok: true, schedule: clean });
+    }
+
     // Poll tiến độ job
     if (url === '/api/job' && req.method === 'GET') {
       const jobs = require('./lib/jobs');
@@ -280,4 +358,22 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`🚀 GTalk Campaign Studio: http://localhost:${PORT}`);
+
+  // ---- Scheduler nội bộ: tự crawl & gửi theo giờ đã cấu hình (không cần GitHub) ----
+  require('./lib/scheduler').start({
+    log: (m) => console.log(m),
+    // Crawl tiến: dùng chung cơ chế startCrawl để UI thấy trạng thái + tránh chạy chồng
+    runCrawl: async () => {
+      const cfg = await store.getConfig();
+      if (!cfg) { console.warn('[scheduler] bỏ crawl: chưa có cấu hình.'); return; }
+      if (crawlState.running) { console.warn('[scheduler] bỏ crawl: đang có lượt crawl khác.'); return; }
+      startCrawl('daily', (roster, mcp, c) => roster.sync(mcp, c, (m) => console.log('[cron-crawl]', m)), cfg);
+    },
+    // Gửi 1 lộ trình theo giờ riêng của nó, KHÔNG crawl (roster do job crawl đã quét)
+    runSend: async (campaignId) => {
+      const { run } = require('./runner');
+      const report = await run({ dryRun: false, sync: false, onlyCampaignId: campaignId, log: (m) => console.log('[cron-send]', m) });
+      console.log(`[cron-send] lộ trình ${campaignId}: gửi OK ${report.sent?.length || 0} · lỗi/bỏ qua ${report.errors?.length || 0}`);
+    },
+  });
 });

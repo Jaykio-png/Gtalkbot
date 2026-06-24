@@ -1,0 +1,33 @@
+name: Crawl ID mới hằng ngày (GTalk Campaign)
+
+# ====== KHUNG GIỜ CRAWL (chỉ quét NV mới, KHÔNG gửi tin) ======
+# Sửa dòng cron bên dưới để đổi giờ. Cron tính theo giờ UTC; VN = UTC + 7.
+#   '0 0 * * *'  -> 00:00 UTC = 07:00 VN  (mặc định: crawl TRƯỚC giờ gửi 1 tiếng)
+#   '30 23 * * *'-> 23:30 UTC = 06:30 VN
+# Lưu ý: nên để giờ crawl SỚM HƠN giờ gửi để roster có NV mới trước khi bắn Bot.
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 00:00 UTC = 07:00 giờ VN
+  workflow_dispatch: {}    # cho phép bấm chạy tay trên tab Actions
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Crawl ID mới (luồng tiến)
+        run: node runner.js --crawl
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_BUCKET: images
+          OA_ID: ${{ secrets.OA_ID }}
+          OA_TOKEN: ${{ secrets.OA_TOKEN }}
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          GTALK_ENV: prod
+          MAX_TENURE_DAYS: '60'
+          CONCURRENCY: '8'

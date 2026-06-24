@@ -805,6 +805,10 @@ input, button, select, textarea { font: inherit; color: inherit; }
 }
 .col-sortable { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; transition: color var(--duration-fast); }
 .col-sortable:hover { color: var(--clr-accent-text); }
+/* Sort trên header bảng GIỮ nguyên table-cell (không dùng flex để khỏi vỡ cột) */
+.col-sort { cursor: pointer; user-select: none; white-space: nowrap; transition: color var(--duration-fast); }
+.col-sort:hover { color: var(--clr-accent-text); }
+.sort-arrow { color: var(--clr-accent-text); font-size: 0.85em; }
 .sort-icon { transition: transform var(--duration-normal) var(--ease-out); }
 .sort-icon.desc { transform: rotate(180deg); }
 .history-table td {

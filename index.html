@@ -63,6 +63,14 @@
           </svg>
           Gửi ngay
         </button>
+        <button class="tab-btn" data-tab="data" id="tabData">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <ellipse cx="8" cy="3.5" rx="5.5" ry="2" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M2.5 3.5V12.5C2.5 13.6 5 14.5 8 14.5C11 14.5 13.5 13.6 13.5 12.5V3.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M2.5 8C2.5 9.1 5 10 8 10C11 10 13.5 9.1 13.5 8" stroke="currentColor" stroke-width="1.3"/>
+          </svg>
+          Bộ dữ liệu
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -441,6 +449,14 @@
                     <option value="HTML">HTML (&lt;b&gt;, &lt;a&gt;, &lt;br/&gt;)</option>
                   </select>
                 </div>
+                <div class="settings-group">
+                  <label class="settings-group-label">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M7 4V7L9 8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                    Giờ bắn Bot (tự động, giờ VN)
+                  </label>
+                  <input type="time" id="cmpSendTime" class="cmp-date-input" style="max-width:160px">
+                  <span class="cmp-hint">Để trống = không tự gửi (chỉ gửi tay). Cần bật công tắc "Tự bắn Bot" ở tab Bộ dữ liệu.</span>
+                </div>
               </div>
             </div>
 
@@ -555,11 +571,134 @@
               <h2 class="history-title" id="qsResultTitle">Kết quả</h2>
               <span id="qsCount" class="filter-count"></span>
             </div>
+            <div id="qsFailSummary" hidden style="margin:0 0 12px;padding:12px 14px;border:1px solid var(--clr-danger,#e5484d);border-radius:10px;background:rgba(229,72,77,.08)">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                <strong style="font-size:var(--fs-sm)">⚠️ <span id="qsFailCount">0</span> ID gửi lỗi</strong>
+                <button type="button" id="qsFailCopy" class="cmp-upload-btn" style="cursor:pointer">📋 Copy ID lỗi</button>
+              </div>
+              <textarea id="qsFailIds" readonly rows="2" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:var(--fs-xs);resize:vertical;background:var(--clr-surface-elevated);border:1px solid var(--clr-border,#333);border-radius:6px;padding:6px 8px;color:inherit"></textarea>
+              <div id="qsFailDetail" style="margin-top:8px;font-size:var(--fs-xs);color:var(--clr-text-muted)"></div>
+            </div>
             <div class="table-wrapper">
               <table class="history-table">
                 <thead><tr><th>#</th><th>Employee ID</th><th>Họ tên</th><th>Chức danh</th><th>Trạng thái</th><th>Nội dung</th></tr></thead>
                 <tbody id="qsBody"></tbody>
               </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ===== TAB 6: Bộ dữ liệu ===== -->
+      <div class="tab-content" id="panelData" data-tab="data" hidden>
+        <section class="search-section">
+          <div class="search-card">
+            <h2 class="history-title" style="margin-bottom:.75rem">⏰ Lịch tự động <small style="color:var(--clr-text-muted);font-weight:500">(giờ VN, chạy ngay trong server)</small></h2>
+            <p class="search-card-desc"><b>Crawl ID mới</b> chạy theo logic <b>TIẾN</b> (quét từ ID mới nhất đã lưu trở lên, bắt NV mới mọc thêm) — 1 giờ chung đặt ở đây. Còn <b>bắn Bot</b> thì <b>mỗi lộ trình tự gửi theo giờ riêng</b> của nó (đặt trong tab Lộ trình → "Giờ bắn Bot"; lộ trình đang bật + có giờ là tự chạy). Nên để crawl sớm hơn giờ bắn. Chỉ chạy khi server bật liên tục (VPS 24/7).</p>
+            <div class="qs-grid" style="margin-top:.5rem">
+              <div class="qs-field">
+                <label class="toggle-label" for="schCrawlEnabled" style="margin-bottom:.5rem">
+                  <span class="toggle-switch"><input type="checkbox" id="schCrawlEnabled" role="switch"><span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span></span>
+                  <span>🔄 Tự crawl ID mới (tiến) — lúc</span>
+                </label>
+                <input type="time" id="schCrawlTime" class="filter-input" value="07:00" style="max-width:160px">
+              </div>
+            </div>
+            <div class="batch-actions" style="margin-top:.75rem;align-items:center">
+              <button id="schSaveBtn" class="search-btn" type="button">💾 Lưu lịch</button>
+              <span id="schMsg" class="cmp-hint"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="search-section">
+          <div class="search-card">
+            <div id="dataStatus" class="run-status">Đang tải trạng thái...</div>
+            <p class="search-card-desc">Hai luồng crawl tách riêng, chỉ bắt NV <b>thâm niên 1 ngày</b> (đã ổn định, lọc no-show/reject) — ≤500 ID/ngày để crawl ít. <b>Seed</b>: nhập ID mới nhất rồi crawl LÙI lấy base (chạy 1 lần). <b>Crawl tiến</b>: mỗi ngày bắt NV mới mọc thêm từ ID đã lưu. Thâm niên tự cộng dồn theo ngày, không cần crawl lại.</p>
+            <div class="batch-actions" style="align-items:flex-end;flex-wrap:wrap;">
+              <div class="qs-field" style="max-width:220px">
+                <label class="filter-label" for="dataSeedId">ID mới nhất (cho Seed)</label>
+                <input type="number" id="dataSeedId" class="filter-input" placeholder="VD: 3175276" min="0" style="width:100%">
+              </div>
+              <button id="dataSeedBtn" class="search-btn search-btn-outline" type="button" title="Crawl LÙI từ ID bạn nhập, lấy toàn bộ NV mới (thâm niên 1 ngày) làm base. Chỉ cần chạy 1 lần."><span class="btn-text">🌱 Seed base (lùi)</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+              <button id="dataCrawlBtn" class="search-btn" type="button" title="Từ ID mới nhất hôm trước crawl TIẾN, bắt NV mới mọc thêm (thâm niên 1 ngày)."><span class="btn-text">🔄 Crawl tiến hôm nay</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+            </div>
+            <p id="dataCrawlMsg" class="cmp-hint" hidden></p>
+          </div>
+        </section>
+
+        <section class="history-section">
+          <div class="history-card">
+            <div class="history-header">
+              <h2 class="history-title">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><ellipse cx="10" cy="4.5" rx="7" ry="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 4.5V15.5C3 16.9 6.1 18 10 18C13.9 18 17 16.9 17 15.5V4.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 10C3 11.4 6.1 12.5 10 12.5C13.9 12.5 17 11.4 17 10" stroke="currentColor" stroke-width="1.5"/></svg>
+                Danh sách nhân viên
+              </h2>
+              <div class="history-actions">
+                <label class="filter-label" style="display:flex;align-items:center;gap:6px;margin:0">Hiện
+                  <select id="dataPageSize" class="run-filter-select" style="min-width:80px">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                  </select>
+                </label>
+                <button id="dataRefreshBtn" class="icon-btn" title="Tải lại danh sách">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M15 3V7H11M3 15V11H7M3.5 7A6 6 0 0 1 14 6M14.5 11A6 6 0 0 1 4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span>Tải lại</span>
+                </button>
+                <span id="dataCount" class="filter-count"></span>
+              </div>
+            </div>
+
+            <!-- Bộ lọc xổ xuống -->
+            <div class="filter-bar">
+              <div class="filter-group">
+                <label class="filter-label" for="dataFilterTitle">Chức danh</label>
+                <select id="dataFilterTitle" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="dataFilterDept">Phòng ban</label>
+                <select id="dataFilterDept" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="dataFilterStatus">Trạng thái</label>
+                <select id="dataFilterStatus" class="filter-select">
+                  <option value="">Tất cả</option>
+                  <option value="active">Đang LV</option>
+                  <option value="off">Đã nghỉ</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="dataFilterDays">Ngày LV</label>
+                <select id="dataFilterDays" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group filter-group-end">
+                <button id="dataClearFilters" class="filter-clear-btn" type="button">Xóa lọc</button>
+              </div>
+            </div>
+
+            <div class="table-wrapper">
+              <table class="history-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th class="col-sort" data-key="workingDays">Ngày LV<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="full_name">Họ tên<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="employee_id">Employee ID<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="title_name">Chức danh<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="dept">Phòng ban<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="start_working_date">Ngày vào<span class="sort-arrow"></span></th>
+                    <th class="col-sort" data-key="active">Trạng thái<span class="sort-arrow"></span></th>
+                  </tr>
+                </thead>
+                <tbody id="dataBody"></tbody>
+              </table>
+            </div>
+            <div class="data-pager" style="display:flex;align-items:center;justify-content:center;gap:.75rem;padding:.85rem 0 .25rem">
+              <button id="dataPrev" class="icon-btn" type="button">‹ Trước</button>
+              <span id="dataPageInfo" class="filter-count"></span>
+              <button id="dataNext" class="icon-btn" type="button">Sau ›</button>
             </div>
           </div>
         </section>
