@@ -54,18 +54,39 @@ async function run({ dryRun = true, sync = null, onlyCampaignId = null, log = ()
 
   if (campaigns.length === 0) { report.note = 'Chưa có lộ trình nào đang bật.'; return report; }
 
-  // 2) Tra cứu các ID cố định (targetIds) — CHỈ dùng roster (danh sách đã crawl), KHÔNG gọi API mới
+  // 2) Tra cứu các ID cố định (targetIds): ưu tiên roster cache, ID nào THIẾU thì lookup MCP có chủ đích.
+  //    Lộ trình ID cố định = "chỉ gửi cho đúng những người này, KỂ CẢ NGƯỜI CŨ" → phải tra được cả NV
+  //    không nằm trong luồng crawl (NV cũ, ID thấp). Tra lỗi vẫn tạo placeholder để bắn thẳng theo ID.
   const rosterData = (await store.getRoster()) || {};
   const rosterEmployees = rosterData.employees || {};
   const targetIds = [...new Set(campaigns.flatMap((c) => (c.targetIds || []).map(Number)).filter(Number.isFinite))];
   const profilesById = {};
   if (targetIds.length) {
-    let miss = 0;
+    const missing = [];
     for (const id of targetIds) {
       const cached = rosterEmployees[String(id)];
-      if (cached) profilesById[id] = cached; else miss++;
+      if (cached) profilesById[id] = cached; else missing.push(id);
     }
-    log(`Tra cứu ${targetIds.length} ID cố định trong roster → có ${targetIds.length - miss}, thiếu ${miss} (bỏ qua, không crawl mới).`);
+    let got = 0;
+    if (missing.length) {
+      // Lookup MCP (kể cả khi sync=false — đây là tra cứu đúng ID, không phải crawl quét dải)
+      if (!mcp) { mcp = new McpClient(config.mcpApiKey); await mcp.connect(); }
+      const pool = Math.min(3, missing.length);
+      let idx = 0;
+      const worker = async () => {
+        while (idx < missing.length) {
+          const id = missing[idx++];
+          try { const r = await mcp.lookup(id, true); if (r?.found && r.profile) { profilesById[id] = r.profile; got++; } }
+          catch { /* bỏ qua ID tra lỗi */ }
+        }
+      };
+      await Promise.all(Array.from({ length: pool }, worker));
+    }
+    // ID nào vẫn chưa có profile → placeholder để vẫn bắn được theo đúng ID (Gtalk chỉ cần employee_id để gửi)
+    for (const id of targetIds) {
+      if (!profilesById[id]) profilesById[id] = { employee_id: id, full_name: `NV #${id}`, title_name: '', org: '', status: 1, status_text: 'đang làm việc' };
+    }
+    log(`Tra cứu ${targetIds.length} ID cố định → ${targetIds.length - missing.length} từ roster, lookup MCP thêm ${got}/${missing.length} (còn lại dùng placeholder, vẫn gửi).`);
   }
 
   // 3) Khớp -> tin cần gửi hôm nay
@@ -81,7 +102,8 @@ async function run({ dryRun = true, sync = null, onlyCampaignId = null, log = ()
 
   for (const s of sends) {
     try {
-      if (!isActive(s.employee)) { report.errors.push({ employee_id: s.employee.employee_id, full_name: s.employee.full_name, campaignName: s.campaignName, day: s.day, error: 'không còn active trong danh sách — bỏ qua' }); continue; }
+      // Lộ trình ID cố định (s.forced) = đã chốt người nhận (kể cả NV cũ) → KHÔNG chặn theo trạng thái active.
+      if (!s.forced && !isActive(s.employee)) { report.errors.push({ employee_id: s.employee.employee_id, full_name: s.employee.full_name, campaignName: s.campaignName, day: s.day, error: 'không còn active trong danh sách — bỏ qua' }); continue; }
 
       let res;
       if (s.imageUrl) {
