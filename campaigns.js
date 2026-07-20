@@ -112,6 +112,7 @@
     $('cmpEnabled').checked = c.enabled !== false;
     $('cmpAnchor').value = c.anchorMode === 'campaign' ? 'campaign' : 'tenure';
     $('cmpStartDate').value = (c.startDate || '').slice(0, 10);
+    $('cmpEnrollFrom').value = (c.enrollFrom || '').slice(0, 10);
     $('cmpTargetIds').value = (c.targetIds || []).join(', ');
     $('cmpParseMode').value = c.parseMode || 'PLAIN_TEXT';
     $('cmpSendTime').value = c.sendTime || '';
@@ -158,13 +159,19 @@
     return row;
   }
 
-  function toggleStartDate() { $('cmpStartDateWrap').hidden = $('cmpAnchor').value !== 'campaign'; }
+  function toggleStartDate() {
+    const isCampaign = $('cmpAnchor').value === 'campaign';
+    $('cmpStartDateWrap').hidden = !isCampaign;
+    // enrollFrom chỉ có nghĩa ở chế độ thâm niên (cuốn chiếu theo ngày vào làm)
+    const ef = $('cmpEnrollFromWrap');
+    if (ef) ef.hidden = isCampaign;
+  }
   $('cmpAnchor').addEventListener('change', toggleStartDate);
 
   $('cmpAddMsg').addEventListener('click', () => $('cmpMessages').appendChild(messageRow('', '')));
 
   $('cmpNewBtn').addEventListener('click', () => {
-    const c = { id: 'cmp_' + Date.now(), name: '', enabled: true, anchorMode: 'tenure', startDate: '', targetIds: [], parseMode: 'PLAIN_TEXT', audience: { titles: [], divisions: [], departments: [], includeOff: false }, messages: [] };
+    const c = { id: 'cmp_' + Date.now(), name: '', enabled: true, anchorMode: 'tenure', startDate: '', enrollFrom: '', targetIds: [], parseMode: 'PLAIN_TEXT', audience: { titles: [], divisions: [], departments: [], includeOff: false }, messages: [] };
     state.campaigns.push(c);
     openEditor(c.id);
     $('cmpName').focus();
@@ -187,6 +194,7 @@
     c.enabled = $('cmpEnabled').checked;
     c.anchorMode = $('cmpAnchor').value;
     c.startDate = c.anchorMode === 'campaign' ? ($('cmpStartDate').value || '') : '';
+    c.enrollFrom = c.anchorMode === 'tenure' ? ($('cmpEnrollFrom').value || '') : '';
     c.targetIds = parseIds($('cmpTargetIds').value);
     c.parseMode = $('cmpParseMode').value;
     c.sendTime = /^([01]\d|2[0-3]):[0-5]\d$/.test($('cmpSendTime').value) ? $('cmpSendTime').value : '';
