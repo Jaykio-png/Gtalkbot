@@ -10,6 +10,12 @@ const { saveUpload } = require('./lib/image');
 const PORT = process.env.PORT || 8090;
 const MCP_ENDPOINT = 'https://ws-mcpgateway.ghn.vn/mcp';
 
+// ---- Lưới chống sập: 1 lỗi async lẻ chỉ GHI LOG, KHÔNG được giết cả tiến trình ----
+// (Trước đây thiếu cái này → 1 promise reject không bắt là sập server + scheduler chết theo,
+//  không ai bật lại → crawl đứng im. Xem sự cố 27/7.)
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', (e && e.stack) || e));
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', (e && e.stack) || e));
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -103,6 +109,23 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type, X-Mcp-Auth, X-Mcp-Session-Id',
     });
     return res.end();
+  }
+
+  // ---- Health check CÔNG KHAI (không cần đăng nhập) — mở URL này để kiểm tra từ xa ----
+  // GET /api/health → { now, lastCrawl:{date,at,found}, crawlRunning }. Không lộ dữ liệu nhạy cảm.
+  if (url === '/api/health' && req.method === 'GET') {
+    let ss = null;
+    try { ss = ((await store.getRoster()) || {}).scanStats || null; } catch { /* Supabase lỗi */ }
+    const now = new Date();
+    const vnDate = new Date(now.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    return sendJSON(res, 200, {
+      ok: true,
+      now: now.toISOString(),
+      vnDateToday: vnDate,
+      crawlRunning: crawlState.running,
+      lastCrawl: ss ? { date: ss.date, at: ss.lastRunAt, found: ss.foundToday, mode: ss.lastMode } : null,
+      crawledToday: ss && ss.date === vnDate,   // hôm nay (giờ VN) đã crawl chưa
+    });
   }
 
   // ================= Đăng nhập (công khai) =================
