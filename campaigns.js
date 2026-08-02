@@ -29,10 +29,12 @@
   $('tabRun').addEventListener('click', () => switchTab('run'));
   $('tabQuick').addEventListener('click', () => switchTab('quick'));
   $('tabData').addEventListener('click', () => switchTab('data'));
+  $('tabLog').addEventListener('click', () => switchTab('log'));
   document.addEventListener('tabchange', (e) => {
     if (e.detail === 'campaigns') loadComposer();
     if (e.detail === 'run') loadRunStatus();
     if (e.detail === 'data') loadDataset();
+    if (e.detail === 'log') loadActivity();
   });
 
   /* ---------- Sub-tab wiring ---------- */
@@ -485,6 +487,9 @@
     renderGroupedResults(sends, isSend);
   }
 
+  // Hiển thị nội dung: render HTML khi lộ trình dùng parseMode HTML, ngược lại escape (giống tab "Gửi ngay")
+  const fmtRunMsg = (txt, parseMode) => (parseMode === 'HTML' ? `<div class="msg-html-preview">${txt || ''}</div>` : esc(txt));
+
   function renderGroupedResults(sends, isSend) {
     const container = $('runGroupedBody');
 
@@ -524,7 +529,7 @@
                   <td class="td-name">${esc(s.full_name)}</td>
                   <td>${s.employee_id}</td>
                   <td>${esc(s.title_name || '—')}</td>
-                  <td class="td-msg">${esc(s.text)}</td>
+                  <td class="td-msg">${fmtRunMsg(s.text, s.parseMode)}</td>
                 </tr>`;
       });
       html += `
@@ -692,4 +697,82 @@
       renderFailSummary([]); // xem trước: chưa gửi nên ẩn bảng lỗi
     }
   }
+
+  /* ================= NHẬT KÝ GỬI (theo ngày) ================= */
+  let activityRows = [];       // entry của ngày đang xem
+  let activityToday = '';      // 'YYYY-MM-DD' hôm nay (giờ VN, do server trả)
+
+  const fmtDay = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : (s || ''); };
+  const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }); };
+
+  async function loadActivity() {
+    const sel = $('logDate');
+    try {
+      const { today, dates } = await api('/api/activity/dates');
+      activityToday = today;
+      const list = (dates || []).slice();
+      if (!list.some((d) => d.date === today)) list.unshift({ date: today, total: 0, ok: 0, error: 0 });
+      const keep = sel.value; // giữ ngày đang chọn nếu vẫn còn
+      sel.innerHTML = list.map((d) => `<option value="${d.date}">${fmtDay(d.date)}${d.date === today ? ' (hôm nay)' : ''} — ${d.total} tin</option>`).join('');
+      sel.value = list.some((d) => d.date === keep) ? keep : today;
+      await loadActivityDay(sel.value);
+    } catch (err) {
+      $('logBody').innerHTML = `<tr><td colspan="7">Lỗi: ${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  async function loadActivityDay(date) {
+    $('logBody').innerHTML = '<tr><td colspan="7">Đang tải...</td></tr>';
+    try {
+      const r = await api('/api/activity?date=' + encodeURIComponent(date));
+      activityRows = r.entries || [];
+      const s = r.summary || { ok: 0, error: 0, total: 0 };
+      $('logSummary').textContent = `✅ ${s.ok} gửi OK · ❌ ${s.error} lỗi · tổng ${s.total}`;
+      renderActivity();
+    } catch (err) {
+      $('logBody').innerHTML = `<tr><td colspan="7">Lỗi: ${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  function renderActivity() {
+    const q = ($('logFilter').value || '').trim().toLowerCase();
+    const rows = q
+      ? activityRows.filter((e) => `${e.name} ${e.employee_id} ${e.text} ${e.campaign}`.toLowerCase().includes(q))
+      : activityRows;
+    $('logCount').textContent = `${rows.length} dòng`;
+    if (!rows.length) { $('logBody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--clr-text-muted);padding:1.5rem">Chưa có tin nào trong ngày này.</td></tr>'; return; }
+    $('logBody').innerHTML = rows.map((e, i) => {
+      const st = e.status === 'ok' ? '<span class="table-status active">đã gửi ✓</span>'
+        : e.status === 'notfound' ? '<span class="table-status inactive">không tìm thấy</span>'
+        : e.status === 'skip' ? '<span class="table-status">bỏ qua</span>'
+        : `<span class="table-status inactive">✗ ${esc(e.error || 'lỗi')}</span>`;
+      const src = e.source === 'campaign' ? `<span title="Lộ trình tự động">🤖 ${esc(e.campaign || 'lộ trình')}</span>` : '<span title="Bắn tay">⚡ Gửi ngay</span>';
+      const img = e.image ? '🖼️ ' : '';
+      const preview = (e.text || '').replace(/\s+/g, ' ').trim();
+      const short = preview.length > 90 ? preview.slice(0, 90) + '…' : preview;
+      return `<tr>
+        <td>${i + 1}</td>
+        <td>${fmtTime(e.at)}</td>
+        <td class="td-name">${esc(e.name || '—')}${e.title ? `<div style="font-size:var(--fs-xs);color:var(--clr-text-muted)">${esc(e.title)}</div>` : ''}</td>
+        <td>${e.employee_id}</td>
+        <td>${src}</td>
+        <td class="td-msg" title="${esc(preview)}">${img}${esc(short) || '<span style="opacity:.5">(chỉ ảnh)</span>'}</td>
+        <td>${st}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  $('logDate')?.addEventListener('change', () => loadActivityDay($('logDate').value));
+  $('logRefreshBtn')?.addEventListener('click', () => loadActivity());
+  $('logFilter')?.addEventListener('input', renderActivity);
+  $('logClearBtn')?.addEventListener('click', async () => {
+    const date = $('logDate').value;
+    if (!date) return;
+    if (!confirm(`Xoá toàn bộ nhật ký ngày ${fmtDay(date)}? Không khôi phục được.`)) return;
+    try {
+      const r = await api('/api/activity/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
+      alert(`Đã xoá ${r.removed} tin của ngày ${fmtDay(date)}.`);
+      loadActivity();
+    } catch (err) { alert('Lỗi: ' + err.message); }
+  });
 })();

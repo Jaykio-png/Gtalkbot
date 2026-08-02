@@ -342,6 +342,20 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { count: employees.length, lastMaxId: r.lastMaxId || null, scanStats: r.scanStats || null, employees });
     }
 
+    // Nhật ký gửi theo ngày — Bot đã gửi cho ai/nội dung gì (tự giữ 2 ngày rồi xoá)
+    if (url === '/api/activity/dates' && req.method === 'GET') {
+      return sendJSON(res, 200, await require('./lib/activity').listDates());
+    }
+    if (url === '/api/activity' && req.method === 'GET') {
+      const date = new URL('http://x' + req.url).searchParams.get('date');
+      return sendJSON(res, 200, await require('./lib/activity').getDay(date));
+    }
+    if (url === '/api/activity/clear' && req.method === 'POST') {
+      const body = await readBody(req);
+      const removed = await require('./lib/activity').clearDay(body.date || null);
+      return sendJSON(res, 200, { ok: true, removed });
+    }
+
     // Lịch tự động: đọc/lưu giờ crawl & gửi (scheduler nội bộ đọc từ đây)
     if (url === '/api/schedule' && req.method === 'GET') {
       return sendJSON(res, 200, await store.getSchedule());

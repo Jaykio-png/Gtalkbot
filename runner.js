@@ -99,6 +99,8 @@ async function run({ dryRun = true, sync = null, onlyCampaignId = null, log = ()
   const gtalk = new GtalkClient({ oaId: config.oaId, oaToken: config.oaToken, env: config.env || 'prod' });
   const imgCache = new Map(); // url -> {buffer,width,height,mimeType,fileName}
   const getImg = async (url) => { if (!imgCache.has(url)) imgCache.set(url, await resolveImage(url)); return imgCache.get(url); };
+  const activity = require('./lib/activity');
+  const activityEntries = []; // nhật ký "gửi cho ai/gì" hôm nay
 
   for (const s of sends) {
     try {
@@ -114,11 +116,14 @@ async function run({ dryRun = true, sync = null, onlyCampaignId = null, log = ()
       }
       sentLog[s.key] = { at: now.toISOString(), globalMsgId: res.globalMsgId, channelId: res.channelId };
       report.sent.push({ employee_id: s.employee.employee_id, full_name: s.employee.full_name, campaignName: s.campaignName, day: s.day, ...res });
+      activityEntries.push(activity.fromCampaignSend(s, now, 'ok'));
     } catch (e) {
       report.errors.push({ employee_id: s.employee.employee_id, full_name: s.employee.full_name, campaignName: s.campaignName, day: s.day, error: e.message });
+      activityEntries.push(activity.fromCampaignSend(s, now, 'error', e.message));
     }
   }
   await store.setSentLog(sentLog);
+  try { await activity.logSends(activityEntries, now); } catch (e) { log('[activity] ghi nhật ký lỗi: ' + e.message); }
   return report;
 }
 
@@ -222,6 +227,14 @@ async function quickSend({ ids = [], text = '', parseMode = 'PLAIN_TEXT', imageU
   const conc = Math.min(sendConcurrency || 3, items.length || 1);
   await Promise.all(Array.from({ length: conc }, async () => { while (i < items.length) await sendOne(items[i++]); }));
   try { await store.setSentLog(sentLog); } catch { /* */ }
+  // Nhật ký "gửi cho ai/gì" — ghi các item đã thực gửi (bỏ qua item resume 'skipped')
+  try {
+    const activity = require('./lib/activity');
+    const ctx = { imageUrl, parseMode };
+    const now = new Date();
+    const entries = items.filter((it) => it.status && it.status !== 'skipped').map((it) => activity.fromBlastItem(it, ctx, now));
+    await activity.logSends(entries, now);
+  } catch (e) { log('[activity] ghi nhật ký lỗi: ' + e.message); }
   return report;
 }
 
