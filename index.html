@@ -71,6 +71,15 @@
           </svg>
           Bộ dữ liệu
         </button>
+        <button class="tab-btn" data-tab="org" id="tabOrg">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="5.5" y="1.5" width="5" height="3.5" rx=".8" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="1" y="11" width="4.5" height="3.5" rx=".8" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="10.5" y="11" width="4.5" height="3.5" rx=".8" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M8 5V8M3.25 11V8H12.75V11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Sơ đồ tổ chức
+        </button>
         <button class="tab-btn" data-tab="log" id="tabLog">
           <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 2H10L13 5V14H3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
@@ -700,6 +709,7 @@
                     <th class="col-sort" data-key="employee_id">Employee ID<span class="sort-arrow"></span></th>
                     <th class="col-sort" data-key="title_name">Chức danh<span class="sort-arrow"></span></th>
                     <th class="col-sort" data-key="dept">Phòng ban<span class="sort-arrow"></span></th>
+                    <th>Bưu cục / Kho</th>
                     <th class="col-sort" data-key="start_working_date">Ngày vào<span class="sort-arrow"></span></th>
                     <th class="col-sort" data-key="active">Trạng thái<span class="sort-arrow"></span></th>
                   </tr>
@@ -714,6 +724,209 @@
             </div>
           </div>
         </section>
+      </div>
+
+      <!-- ===== TAB: Sơ đồ tổ chức (danh bạ dim_employee qua Data API) ===== -->
+      <div class="tab-content" id="panelOrg" data-tab="org" hidden>
+        <!-- ===== Sub-tabs (class org-* riêng, KHÔNG dùng cmp-* kẻo đá với tab Lộ trình) ===== -->
+        <div class="org-subtabs" id="orgSubtabs">
+          <button class="org-subtab active" data-subtab="dir" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M5 5.5H11M5 8H11M5 10.5H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Danh bạ tổ chức
+          </button>
+          <button class="org-subtab" data-subtab="daily" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.5H14M5.5 1.5V4M10.5 1.5V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 8.5V11.5M6.5 10H9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            NV mới mỗi ngày
+          </button>
+        </div>
+
+        <!-- ===== Sub-panel 1: Danh bạ (crawl toàn bộ, để đó dùng dần) ===== -->
+        <div class="org-subpanel" data-subtab="dir">
+        <section class="search-section">
+          <div class="search-card">
+            <h2 class="history-title" style="margin-bottom:.75rem">🏢 Danh bạ tổ chức <small style="color:var(--clr-text-muted);font-weight:500">(nguồn: Data API — dim_employee)</small></h2>
+            <p class="search-card-desc">Kéo <b>cây tổ chức 4 cấp</b> (Khối → Phòng → Bộ phận → Nhóm) của toàn công ty về máy chủ rồi lưu cache, nên mở tab là hiện ngay. Mỗi lần bấm <b>Đồng bộ</b> tốn <b>1 lượt quota</b> (token có 50 lượt/ngày, reset 07:00 giờ VN) — kéo bao nhiêu dòng cũng chỉ tính 1 lượt. Bấm <b>Kiểm tra kết nối</b> để thử gọi tới Data API (không tốn quota).</p>
+            <div id="orgStatus" class="run-status">Đang tải trạng thái...</div>
+            <div class="batch-actions" style="margin-top:.75rem;align-items:center;flex-wrap:wrap">
+              <button id="orgPingBtn" class="search-btn search-btn-outline" type="button" title="Thử gọi tới Data API. Không tốn quota."><span class="btn-text">📡 Kiểm tra kết nối</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+              <button id="orgSyncBtn" class="search-btn" type="button" title="Kéo lại danh bạ từ dim_employee. Tốn 1 lượt quota."><span class="btn-text">🔄 Đồng bộ ngay</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+              <label class="toggle-label" for="orgIncludeOff" style="margin:0 0 0 .35rem">
+                <span class="toggle-switch"><input type="checkbox" id="orgIncludeOff" role="switch"><span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span></span>
+                <span>Lấy cả NV đã nghỉ <small style="color:var(--clr-text-muted)">(~170k dòng, chậm &amp; nặng)</small></span>
+              </label>
+            </div>
+            <p id="orgSyncMsg" class="cmp-hint" hidden></p>
+          </div>
+        </section>
+
+        <section class="history-section">
+          <div class="history-card">
+            <div class="history-header">
+              <h2 class="history-title">🌳 Cây tổ chức</h2>
+              <div class="history-actions">
+                <button id="orgTreeExpand" class="icon-btn" type="button">Mở hết</button>
+                <button id="orgTreeCollapse" class="icon-btn" type="button">Thu hết</button>
+              </div>
+            </div>
+            <div id="orgTree" class="org-tree">Chưa có dữ liệu — bấm <b>Đồng bộ ngay</b>.</div>
+          </div>
+        </section>
+
+        <section class="history-section">
+          <div class="history-card">
+            <div class="history-header">
+              <h2 class="history-title">👥 Tra cứu nhân viên</h2>
+              <div class="history-actions">
+                <label class="filter-label" style="display:flex;align-items:center;gap:6px;margin:0">Hiện
+                  <select id="orgPageSize" class="run-filter-select" style="min-width:80px">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                  </select>
+                </label>
+                <button id="orgExportBtn" class="icon-btn" type="button" title="Tải kết quả đang lọc ra file CSV (mở được bằng Excel)">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2V11M9 11L5.5 7.5M9 11L12.5 7.5M3 13.5V15H15V13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span>Xuất CSV</span>
+                </button>
+                <span id="orgCount" class="filter-count"></span>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <div class="filter-group" style="flex:2 1 220px">
+                <label class="filter-label" for="orgSearch">Tìm (tên / ID / chức danh)</label>
+                <input type="text" id="orgSearch" class="filter-input" placeholder="Gõ không dấu cũng được: nguyen van..." style="width:100%">
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="orgFilterDivision">Khối</label>
+                <select id="orgFilterDivision" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="orgFilterDepartment">Phòng</label>
+                <select id="orgFilterDepartment" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="orgFilterSection">Bộ phận</label>
+                <select id="orgFilterSection" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="orgFilterTeam">Nhóm</label>
+                <select id="orgFilterTeam" class="filter-select"><option value="">Tất cả</option></select>
+              </div>
+              <div class="filter-group filter-group-end">
+                <button id="orgClearFilters" class="filter-clear-btn" type="button">Xóa lọc</button>
+              </div>
+            </div>
+
+            <div class="table-wrapper">
+              <table class="history-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Họ tên</th>
+                    <th>Employee ID</th>
+                    <th>Chức danh</th>
+                    <th>Bưu cục / Kho</th>
+                    <th>Nhóm</th>
+                    <th>Bộ phận</th>
+                    <th>Phòng</th>
+                    <th>Khối</th>
+                    <th>Ngày vào</th>
+                    <th>Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody id="orgBody"></tbody>
+              </table>
+            </div>
+            <div class="data-pager" style="display:flex;align-items:center;justify-content:center;gap:.75rem;padding:.85rem 0 .25rem">
+              <button id="orgPrev" class="icon-btn" type="button">‹ Trước</button>
+              <span id="orgPageInfo" class="filter-count"></span>
+              <button id="orgNext" class="icon-btn" type="button">Sau ›</button>
+            </div>
+          </div>
+        </section>
+        </div><!-- /sub-panel dir -->
+
+        <!-- ===== Sub-panel 2: NV mới mỗi ngày ===== -->
+        <div class="org-subpanel" data-subtab="daily" hidden>
+          <section class="search-section">
+            <div class="search-card">
+              <h2 class="history-title" style="margin-bottom:.75rem">📅 Lấy nhân viên mới mỗi ngày</h2>
+              <p class="search-card-desc">Mỗi ngày tự chạy <b>1 query duy nhất</b> làm cả hai việc: <b>làm mới danh bạ</b> ở tab bên cạnh (người nghỉ / chuyển phòng tự cập nhật) và lọc ra NV có <b>ngày vào làm là hôm qua hoặc hôm nay</b>, kèm <b>bưu cục/kho</b>. Tốn <b>1 lượt quota/ngày</b> cho cả hai — quota tính theo lượt query chứ không theo số dòng. Lấy 2 ngày (không chỉ hôm nay) để vớt hồ sơ HR chốt muộn. Người lấy về được <b>ghép thẳng vào roster</b> — lộ trình Tân thủ bắn được ngay, kể cả những người crawl MCP bỏ sót. Kết quả cũng lưu theo ngày để xem lại, không cần chạy lại.</p>
+              <p class="search-card-desc" style="color:var(--clr-warning,#d97706)">⚠️ Bưu cục/kho hiện đang là <b>mã số</b>, chưa có tên: token chỉ được cấp quyền đọc đúng bảng <code>dim_employee</code> — bảng danh mục kho trả về <i>403 forbidden</i>. Xin Data team mở quyền bảng warehouse là hiện được tên.</p>
+              <div id="dailyStatus" class="run-status">Đang tải trạng thái...</div>
+              <div class="qs-grid" style="margin-top:.5rem">
+                <div class="qs-field">
+                  <label class="toggle-label" for="dailyEnabled" style="margin-bottom:.5rem">
+                    <span class="toggle-switch"><input type="checkbox" id="dailyEnabled" role="switch"><span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span></span>
+                    <span>📅 Tự lấy NV mới hằng ngày — lúc</span>
+                  </label>
+                  <input type="time" id="dailyTime" class="filter-input" value="08:00" style="max-width:160px">
+                </div>
+              </div>
+              <div class="batch-actions" style="margin-top:.75rem;align-items:center;flex-wrap:wrap">
+                <button id="dailySaveBtn" class="search-btn search-btn-outline" type="button">💾 Lưu lịch</button>
+                <button id="dailyRunBtn" class="search-btn" type="button" title="Chạy ngay bây giờ, tốn 1 lượt quota."><span class="btn-text">▶️ Chạy ngay</span><span class="btn-loader" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="40 60" stroke-linecap="round"/></svg></span></button>
+                <span id="dailyMsg" class="cmp-hint"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="history-section">
+            <div class="history-card">
+              <div class="history-header">
+                <h2 class="history-title">🆕 Nhân viên mới</h2>
+                <div class="history-actions">
+                  <label class="filter-label" style="display:flex;align-items:center;gap:6px;margin:0">Ngày chạy
+                    <select id="dailyDate" class="run-filter-select" style="min-width:150px"></select>
+                  </label>
+                  <button id="dailyExportBtn" class="icon-btn" type="button" title="Tải danh sách ra CSV">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2V11M9 11L5.5 7.5M9 11L12.5 7.5M3 13.5V15H15V13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Xuất CSV</span>
+                  </button>
+                  <span id="dailyCount" class="filter-count"></span>
+                </div>
+              </div>
+
+              <div class="filter-bar">
+                <div class="filter-group" style="flex:2 1 220px">
+                  <label class="filter-label" for="dailySearch">Tìm (tên / ID)</label>
+                  <input type="text" id="dailySearch" class="filter-input" placeholder="Gõ không dấu cũng được..." style="width:100%">
+                </div>
+                <div class="filter-group">
+                  <label class="filter-label" for="dailyFilterDay">Vào ngày</label>
+                  <select id="dailyFilterDay" class="filter-select"><option value="">Cả hai</option></select>
+                </div>
+                <div class="filter-group">
+                  <label class="filter-label" for="dailyFilterWh">Bưu cục / Kho</label>
+                  <select id="dailyFilterWh" class="filter-select"><option value="">Tất cả</option></select>
+                </div>
+                <div class="filter-group filter-group-end">
+                  <button id="dailyClearFilters" class="filter-clear-btn" type="button">Xóa lọc</button>
+                </div>
+              </div>
+
+              <div class="table-wrapper">
+                <table class="history-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Employee ID</th>
+                      <th>Họ tên</th>
+                      <th>Chức danh</th>
+                      <th>Department</th>
+                      <th>Khu vực</th>
+                      <th>Bưu cục / Kho (mã)</th>
+                      <th>Ngày vào</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dailyBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div><!-- /sub-panel daily -->
       </div>
 
       <!-- ===== TAB: Nhật ký gửi ===== -->
@@ -834,6 +1047,7 @@
         run: 'Chạy & Gửi',
         quick: 'Gửi ngay',
         data: 'Bộ dữ liệu',
+        org: 'Sơ đồ tổ chức',
         log: 'Nhật ký gửi'
       };
 
@@ -861,5 +1075,6 @@
 
   <script src="app.js"></script>
   <script src="campaigns.js"></script>
+  <script src="orgchart.js"></script>
 </body>
 </html>

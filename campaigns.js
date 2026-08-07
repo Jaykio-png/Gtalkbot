@@ -10,6 +10,15 @@
   };
   const esc = (s) => { const e = document.createElement('span'); e.textContent = s == null ? '' : s; return e.innerHTML; };
 
+  // Ô "Bưu cục / Kho" — giống tab Sơ đồ tổ chức: có tên thì hiện tên kèm mã mờ, chưa có tên thì
+  // hiện mỗi mã (danh mục kho đang dán tay ở lib/warehouses.js, mới phủ ~24% số người có mã).
+  const whCell = (p) => {
+    if (p.warehouse_id == null) return '—';
+    return p.warehouse_name
+      ? `${esc(p.warehouse_name)}<br><small style="color:var(--clr-text-muted)">${esc(p.warehouse_id)}</small>`
+      : `<span style="color:var(--clr-text-muted)">${esc(p.warehouse_id)}</span>`;
+  };
+
   // Tải file ảnh từ máy -> server -> điền ref vào ô URL
   async function uploadFile(file, urlInput, statusEl) {
     if (!file) return;
@@ -329,7 +338,7 @@
       if (a) a.textContent = th.dataset.key === dataSort.key ? (dataSort.asc ? ' ▲' : ' ▼') : '';
     });
     if (!datasetRows.length) {
-      body.innerHTML = '<tr class="no-results-row"><td colspan="8">Chưa có dữ liệu. Bấm “🌱 Seed base (lùi)” để bắt đầu.</td></tr>';
+      body.innerHTML = '<tr class="no-results-row"><td colspan="9">Chưa có dữ liệu. Bấm “🌱 Seed base (lùi)” để bắt đầu.</td></tr>';
       $('dataCount').innerHTML = '';
       $('dataPageInfo').textContent = '';
       $('dataPrev').disabled = $('dataNext').disabled = true;
@@ -341,7 +350,7 @@
       ? `<span class="count-num">${total}</span> NV`
       : `<span class="count-num">${total}</span> / ${datasetRows.length} NV`;
     if (!total) {
-      body.innerHTML = '<tr class="no-results-row"><td colspan="8">Không có NV khớp bộ lọc.</td></tr>';
+      body.innerHTML = '<tr class="no-results-row"><td colspan="9">Không có NV khớp bộ lọc.</td></tr>';
       $('dataPageInfo').textContent = '';
       $('dataPrev').disabled = $('dataNext').disabled = true;
       return;
@@ -364,6 +373,7 @@
         <td>${esc(p.employee_id)}</td>
         <td>${esc(p.title_name || '—')}</td>
         <td>${esc(p.department || p.division || '—')}</td>
+        <td>${whCell(p)}</td>
         <td>${fmtDate(p.start_working_date)}</td>
         <td><span class="table-status ${active ? 'active' : 'inactive'}">${active ? 'Đang LV' : 'Đã nghỉ'}</span></td>
       </tr>`;
@@ -402,14 +412,14 @@
     loadDataStatus();
     loadSchedule();
     const body = $('dataBody');
-    body.innerHTML = '<tr><td colspan="8">Đang tải...</td></tr>';
+    body.innerHTML = '<tr><td colspan="9">Đang tải...</td></tr>';
     try {
       const d = await api('/api/dataset');
       datasetRows = d.employees || [];
       dataPage = 1;
       populateDataFilters();
       renderDataRows();
-    } catch (err) { body.innerHTML = `<tr><td colspan="8">Lỗi: ${esc(err.message)}</td></tr>`; }
+    } catch (err) { body.innerHTML = `<tr><td colspan="9">Lỗi: ${esc(err.message)}</td></tr>`; }
   }
 
   // ----- Lịch tự động (scheduler nội bộ) -----

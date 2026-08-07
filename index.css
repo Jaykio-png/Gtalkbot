@@ -1138,7 +1138,10 @@ input, button, select, textarea { font: inherit; color: inherit; }
 /* ======================================
    Campaign Editor Sub-tabs
    ====================================== */
-.cmp-subtabs {
+/* .org-* dùng CHUNG kiểu với .cmp-* nhưng khác tên class: handler sub-tab trong campaigns.js
+   bắt mọi .cmp-subtab trên trang, xài lại tên đó thì 2 tab đá nhau (bấm bên này tắt bên kia). */
+.cmp-subtabs,
+.org-subtabs {
   display: flex;
   gap: 2px;
   background: var(--clr-surface-elevated);
@@ -1148,7 +1151,8 @@ input, button, select, textarea { font: inherit; color: inherit; }
   margin-bottom: var(--space-lg);
 }
 
-.cmp-subtab {
+.cmp-subtab,
+.org-subtab {
   flex: 1;
   display: flex;
   align-items: center;
@@ -1166,22 +1170,25 @@ input, button, select, textarea { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
-.cmp-subtab:hover {
+.cmp-subtab:hover,
+.org-subtab:hover {
   color: var(--clr-text-secondary);
   background: var(--clr-surface-hover);
 }
 
-.cmp-subtab.active {
+.cmp-subtab.active,
+.org-subtab.active {
   color: var(--tab-active-text);
   background: var(--clr-accent);
   font-weight: 600;
   box-shadow: 0 1px 6px var(--clr-accent-glow);
 }
 
-.cmp-subtab svg { opacity: 0.7; flex-shrink: 0; }
-.cmp-subtab.active svg { opacity: 1; }
+.cmp-subtab svg, .org-subtab svg { opacity: 0.7; flex-shrink: 0; }
+.cmp-subtab.active svg, .org-subtab.active svg { opacity: 1; }
 
-.cmp-subpanel {
+.cmp-subpanel,
+.org-subpanel {
   animation: fade-in var(--duration-normal) var(--ease-out);
 }
 
@@ -1354,3 +1361,57 @@ input, button, select, textarea { font: inherit; color: inherit; }
 .toggle-switch input:checked + .toggle-track .toggle-thumb {
   transform: translateX(18px);
 }
+
+/* ===== Tab Sơ đồ tổ chức — cây 4 cấp ===== */
+/* Thụt lề theo biến --d (độ sâu) để khỏi phải viết CSS riêng cho từng cấp. */
+.org-tree {
+  padding: .35rem .25rem 1rem;
+  font-size: .9rem;
+  max-height: 520px;
+  overflow: auto;
+}
+.org-branch,
+.org-leaf { padding-left: calc(var(--d, 0) * 1.15rem); }
+
+.org-branch > summary,
+.org-leaf {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .3rem .5rem;
+  border-radius: 7px;
+  cursor: default;
+}
+.org-branch > summary { cursor: pointer; list-style: none; }
+.org-branch > summary::-webkit-details-marker { display: none; }
+/* Mũi tên tự xoay khi mở — dùng ::before của summary, không cần JS */
+.org-branch > summary::before {
+  content: '';
+  flex: none;
+  width: 0; height: 0;
+  border-left: 5px solid var(--clr-text-muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform .15s ease;
+}
+.org-branch[open] > summary::before { transform: rotate(90deg); }
+/* Lá không có mũi tên -> chừa đúng khoảng trống để tên vẫn thẳng hàng với nhánh */
+.org-leaf::before { content: ''; flex: none; width: 5px; }
+
+.org-branch > summary:hover,
+.org-leaf:hover { background: var(--clr-surface-hover); }
+.org-branch > summary .org-name { font-weight: 600; }
+.org-leaf .org-name { color: var(--clr-text-muted); }
+
+.org-count {
+  flex: none;
+  margin-left: auto;
+  padding: .05rem .45rem;
+  border-radius: 999px;
+  background: var(--clr-surface-elevated);
+  border: 1px solid var(--clr-border-subtle);
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--clr-text-muted);
+}
+.org-branch[open] > summary > .org-count { color: var(--clr-accent-text); }

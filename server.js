@@ -78,6 +78,59 @@ function startCrawl(mode, runner, cfg) {
     .catch((e) => { crawlState.running = false; crawlState.finishedAt = Date.now(); crawlState.error = e.message; console.error(`[${mode}] lỗi:`, e.message); });
 }
 
+// Trạng thái đồng bộ danh bạ tổ chức (chạy nền, UI poll /api/org/status).
+let orgSyncState = { running: false, startedAt: null, finishedAt: null, error: null, rows: 0, quotaRemaining: null };
+
+// Kéo danh bạ dim_employee về trong nền. Mỗi lần tốn ĐÚNG 1 lượt quota (drain không tính thêm).
+function startOrgSync(cfg, includeOff) {
+  orgSyncState = { running: true, startedAt: Date.now(), finishedAt: null, error: null, rows: 0, quotaRemaining: null };
+  (async () => {
+    const { DapClient } = require('./lib/dap');
+    const orgdir = require('./lib/orgdir');
+    const dap = new DapClient(cfg.dataApiToken, { host: cfg.dataApiHost });
+    const r = await orgdir.sync(dap, { includeOff, onProgress: (n) => { orgSyncState.rows = n; } });
+    orgSyncState.rows = r.count;
+    orgSyncState.quotaRemaining = r.quotaRemaining;
+  })()
+    .then(() => { orgSyncState.running = false; orgSyncState.finishedAt = Date.now(); })
+    .catch((e) => {
+      const { friendly } = require('./lib/dap');
+      orgSyncState.running = false;
+      orgSyncState.finishedAt = Date.now();
+      orgSyncState.error = e.name === 'DapError' ? friendly(e) : e.message;
+      console.error('[org-sync] lỗi:', e.message);
+    });
+}
+
+// Trạng thái lượt lấy "NV mới mỗi ngày" (chạy nền, UI poll /api/newhires/status).
+let newHiresState = { running: false, startedAt: null, finishedAt: null, error: null, count: 0, date: null, merged: null, dirCount: 0, quotaRemaining: null };
+
+// Lấy NV mới (vào làm hôm qua/hôm nay) trong nền. 1 lượt quota mỗi lần.
+function startNewHires(cfg) {
+  newHiresState = { running: true, startedAt: Date.now(), finishedAt: null, error: null, count: 0, date: null, merged: null, dirCount: 0, quotaRemaining: null };
+  (async () => {
+    const { DapClient } = require('./lib/dap');
+    const nh = require('./lib/newhires');
+    const dap = new DapClient(cfg.dataApiToken, { host: cfg.dataApiHost });
+    const r = await nh.run(dap, { onProgress: (n) => { newHiresState.count = n; } });
+    newHiresState.count = r.count;
+    newHiresState.date = r.date;
+    newHiresState.merged = r.merged;
+    newHiresState.dirCount = r.dirCount;
+    newHiresState.quotaRemaining = r.quotaRemaining;
+    const mg = r.merged || {};
+    console.log(`[newhires] ${r.date}: danh bạ ${r.dirCount} NV · mới ${r.count} (${r.days.join(' → ')}) → roster +${mg.added || 0}, vá ${mg.updated || 0}, tổng ${mg.total || 0}`);
+  })()
+    .then(() => { newHiresState.running = false; newHiresState.finishedAt = Date.now(); })
+    .catch((e) => {
+      const { friendly } = require('./lib/dap');
+      newHiresState.running = false;
+      newHiresState.finishedAt = Date.now();
+      newHiresState.error = e.name === 'DapError' ? friendly(e) : e.message;
+      console.error('[newhires] lỗi:', e.message);
+    });
+}
+
 function newSession() {
   const sid = crypto.randomBytes(24).toString('hex');
   SESSIONS.set(sid, Date.now() + SESSION_TTL);
@@ -334,9 +387,12 @@ const server = http.createServer(async (req, res) => {
     // Bộ dữ liệu: trả danh sách NV trong roster + thâm niên TÍNH TẠI THỜI ĐIỂM XEM (tự cộng dồn theo ngày)
     if (url === '/api/dataset' && req.method === 'GET') {
       const r = (await store.getRoster()) || {};
+      // Tên kho tra LÚC ĐỌC từ danh mục dán tay — không lưu trong roster, nên bổ sung
+      // danh mục là có hiệu lực ngay, khỏi phải chạy vá lại (xem lib/warehouses.js).
+      const { warehouseName } = require('./lib/warehouses');
       const employees = Object.values(r.employees || {}).map((p) => {
         const { division, department } = parseOrg(p.org);
-        return { ...p, division, department, workingDays: workingDays(p) };
+        return { ...p, division, department, warehouse_name: warehouseName(p.warehouse_id), workingDays: workingDays(p) };
       });
       employees.sort((a, b) => (a.workingDays ?? 0) - (b.workingDays ?? 0) || a.employee_id - b.employee_id);
       return sendJSON(res, 200, { count: employees.length, lastMaxId: r.lastMaxId || null, scanStats: r.scanStats || null, employees });
@@ -363,13 +419,122 @@ const server = http.createServer(async (req, res) => {
     if (url === '/api/schedule' && req.method === 'PUT') {
       const body = await readBody(req);
       const isHHMM = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s || ''));
+      // MERGE chứ không ghi đè: lịch giờ có 2 việc độc lập (crawl MCP + NV mới Data API) do 2 chỗ
+      // khác nhau trên UI lưu. Ghi đè cả object thì lưu bên này lặng lẽ TẮT lịch bên kia.
+      // Trường nào không gửi lên thì giữ nguyên giá trị cũ.
+      const cur = (await store.getSchedule()) || {};
+      const bool = (v, old) => (v === undefined ? !!old : !!v);
+      const time = (v, old, def) => (isHHMM(v) ? v : (isHHMM(old) ? old : def));
       const clean = {
-        crawlEnabled: !!body.crawlEnabled,
-        crawlTime: isHHMM(body.crawlTime) ? body.crawlTime : '07:00',
+        crawlEnabled: bool(body.crawlEnabled, cur.crawlEnabled),
+        crawlTime: time(body.crawlTime, cur.crawlTime, '07:00'),
+        newHiresEnabled: bool(body.newHiresEnabled, cur.newHiresEnabled),
+        newHiresTime: time(body.newHiresTime, cur.newHiresTime, '08:00'),
       };
       await store.setSchedule(clean);
       require('./lib/scheduler').setSchedule(clean); // cập nhật lịch đang chạy ngay
       return sendJSON(res, 200, { ok: true, schedule: clean });
+    }
+
+    /* ===== Sơ đồ tổ chức (danh bạ dim_employee qua Data API) ===== */
+
+    // Trạng thái: đã cấu hình token chưa, cache lần cuối lúc nào, đang sync không
+    if (url === '/api/org/status' && req.method === 'GET') {
+      const cfg = (await store.getConfig()) || {};
+      const dir = await store.getOrgDir();
+      return sendJSON(res, 200, {
+        configured: !!cfg.dataApiToken,
+        host: cfg.dataApiHost || require('./lib/dap').DEFAULT_HOST,
+        updatedAt: (dir && dir.updatedAt) || null,
+        count: (dir && dir.count) || 0,
+        includeOff: !!(dir && dir.includeOff),
+        stats: (dir && dir.stats) || null,
+        sync: orgSyncState,
+      });
+    }
+
+    // Kiểm tra kết nối tới Data API — KHÔNG tốn quota. Mở trên bản deploy để biết
+    // server có nằm trong mạng nội bộ GHN hay không (API là IP nội bộ 10.139.0.22).
+    if (url === '/api/org/ping' && req.method === 'POST') {
+      const cfg = (await store.getConfig()) || {};
+      if (!cfg.dataApiToken) return sendJSON(res, 400, { error: 'Chưa cấu hình DATA_API_TOKEN.' });
+      const { DapClient } = require('./lib/dap');
+      const r = await new DapClient(cfg.dataApiToken, { host: cfg.dataApiHost }).ping();
+      return sendJSON(res, 200, r);
+    }
+
+    // Kéo danh bạ về (chạy nền, UI poll /api/org/status). Tốn 1 lượt quota.
+    if (url === '/api/org/sync' && req.method === 'POST') {
+      if (orgSyncState.running) return sendJSON(res, 409, { error: 'Đang đồng bộ, chờ xong đã.' });
+      const cfg = (await store.getConfig()) || {};
+      if (!cfg.dataApiToken) return sendJSON(res, 400, { error: 'Chưa cấu hình DATA_API_TOKEN.' });
+      const body = await readBody(req);
+      startOrgSync(cfg, !!body.includeOff);
+      return sendJSON(res, 200, { ok: true, started: true });
+    }
+
+    // Tra cứu danh bạ (lọc + phân trang phía server — 22.6k dòng, đừng ném hết xuống trình duyệt)
+    if (url === '/api/org' && req.method === 'GET') {
+      const orgdir = require('./lib/orgdir');
+      const dir = await orgdir.load();
+      if (!dir) return sendJSON(res, 200, { total: 0, items: [], empty: true });
+      const p = new URL('http://x' + req.url).searchParams;
+      const r = orgdir.search(dir, {
+        q: p.get('q'), division: p.get('division'), department: p.get('department'),
+        section: p.get('section'), team: p.get('team'), status: p.get('status'),
+        page: p.get('page'), pageSize: p.get('pageSize'),
+      });
+      return sendJSON(res, 200, { ...r, updatedAt: dir.updatedAt });
+    }
+
+    // Cây tổ chức 4 cấp + số NV mỗi nhánh
+    if (url === '/api/org/tree' && req.method === 'GET') {
+      const orgdir = require('./lib/orgdir');
+      const dir = await orgdir.load();
+      return sendJSON(res, 200, { tree: dir ? orgdir.buildTree(dir) : [], updatedAt: dir && dir.updatedAt });
+    }
+
+    // Giá trị cho dropdown lọc (kèm số NV mỗi nhánh)
+    if (url === '/api/org/facets' && req.method === 'GET') {
+      const orgdir = require('./lib/orgdir');
+      const dir = await orgdir.load();
+      if (!dir) return sendJSON(res, 200, { divisions: [], departments: [], sections: [], teams: [] });
+      return sendJSON(res, 200, {
+        divisions: orgdir.facet(dir, 'division_name'),
+        departments: orgdir.facet(dir, 'department_name'),
+        sections: orgdir.facet(dir, 'section_name'),
+        teams: orgdir.facet(dir, 'team_name'),
+      });
+    }
+
+    /* ===== NV mới mỗi ngày (sub-tab 2) ===== */
+
+    // Trạng thái + danh sách ngày đã chạy
+    if (url === '/api/newhires/status' && req.method === 'GET') {
+      const cfg = (await store.getConfig()) || {};
+      const nh = require('./lib/newhires');
+      return sendJSON(res, 200, {
+        configured: !!cfg.dataApiToken,
+        dates: await nh.listDates(),
+        run: newHiresState,
+        retainDays: nh.RETAIN_DAYS,
+      });
+    }
+
+    // Kết quả 1 ngày chạy (không truyền date → ngày mới nhất)
+    if (url === '/api/newhires' && req.method === 'GET') {
+      const date = new URL('http://x' + req.url).searchParams.get('date');
+      const r = await require('./lib/newhires').getRun(date);
+      return sendJSON(res, 200, r || { empty: true, items: [] });
+    }
+
+    // Chạy ngay (chạy nền, tốn 1 lượt quota)
+    if (url === '/api/newhires/run' && req.method === 'POST') {
+      if (newHiresState.running) return sendJSON(res, 409, { error: 'Đang chạy, chờ xong đã.' });
+      const cfg = (await store.getConfig()) || {};
+      if (!cfg.dataApiToken) return sendJSON(res, 400, { error: 'Chưa cấu hình DATA_API_TOKEN.' });
+      startNewHires(cfg);
+      return sendJSON(res, 200, { ok: true, started: true });
     }
 
     // Poll tiến độ job
@@ -405,6 +570,13 @@ server.listen(PORT, () => {
       if (!cfg) { console.warn('[scheduler] bỏ crawl: chưa có cấu hình.'); return; }
       if (crawlState.running) { console.warn('[scheduler] bỏ crawl: đang có lượt crawl khác.'); return; }
       startCrawl('daily', (roster, mcp, c) => roster.sync(mcp, c, (m) => console.log('[cron-crawl]', m)), cfg);
+    },
+    // NV mới hằng ngày qua Data API — dùng chung startNewHires để UI thấy trạng thái + không chạy chồng
+    runNewHires: async () => {
+      const cfg = await store.getConfig();
+      if (!cfg || !cfg.dataApiToken) { console.warn('[scheduler] bỏ NV mới: chưa có DATA_API_TOKEN.'); return; }
+      if (newHiresState.running) { console.warn('[scheduler] bỏ NV mới: đang có lượt khác.'); return; }
+      startNewHires(cfg);
     },
     // Gửi 1 lộ trình theo giờ riêng của nó, KHÔNG crawl (roster do job crawl đã quét)
     runSend: async (campaignId) => {
